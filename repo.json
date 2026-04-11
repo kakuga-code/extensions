@@ -13,24 +13,17 @@
       "language": "en"
     },
     {
-      "id": "aniwatch",
-      "name": "Aniwatch",
-      "scriptUrl": "https://raw.githubusercontent.com/kakuga-code/extensions/main/scripts/sources/en/aniwatch.js",
-      "version": "1.0.0",
-      "language": "en"
-    },
-    {
       "id": "animeflv",
       "name": "AnimeFLV",
       "scriptUrl": "https://raw.githubusercontent.com/kakuga-code/extensions/main/scripts/sources/es/animeflv.js",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "language": "es"
     },
     {
-      "id": "doramasflix",
-      "name": "Doramasflix",
-      "scriptUrl": "https://raw.githubusercontent.com/kakuga-code/extensions/main/scripts/sources/es/doramasflix.js",
-      "version": "1.0.2",
+      "id": "blender",
+      "name": "Blender Open Movies",
+      "scriptUrl": "https://raw.githubusercontent.com/kakuga-code/extensions/main/scripts/sources/es/blender.js",
+      "version": "1.2.0",
       "language": "es"
     },
     {
@@ -44,7 +37,7 @@
       "id": "jkanime",
       "name": "JKanime",
       "scriptUrl": "https://raw.githubusercontent.com/kakuga-code/extensions/main/scripts/sources/es/jkanime.js",
-      "version": "1.1.4",
+      "version": "1.1.5",
       "language": "es"
     }
   ],
@@ -53,6 +46,12 @@
       "id": "doodstream",
       "name": "Doodstream",
       "scriptUrl": "https://raw.githubusercontent.com/kakuga-code/extensions/main/scripts/extractors/doodstream.js",
+      "version": "1.0.0"
+    },
+    {
+      "id": "filemoon",
+      "name": "Filemoon",
+      "scriptUrl": "https://raw.githubusercontent.com/kakuga-code/extensions/main/scripts/extractors/filemoon.js",
       "version": "1.0.0"
     },
     {
@@ -101,6 +100,12 @@
       "id": "uqload",
       "name": "Uqload",
       "scriptUrl": "https://raw.githubusercontent.com/kakuga-code/extensions/main/scripts/extractors/uqload.js",
+      "version": "1.0.0"
+    },
+    {
+      "id": "vidnest",
+      "name": "VidNest",
+      "scriptUrl": "https://raw.githubusercontent.com/kakuga-code/extensions/main/scripts/extractors/vidnest.js",
       "version": "1.0.0"
     },
     {

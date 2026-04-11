@@ -6,9 +6,76 @@ const SOURCE = {
   name: "AnimeFLV",
   baseUrl: "https://www4.animeflv.net",
   language: "es",
-  version: "1.1.0",
+  version: "1.1.1",
   iconUrl: "https://www3.animeflv.net/favicon.ico",
-  contentKind: "anime"
+  contentKind: "anime",
+  supportedTypes: ["tv", "movie", "special", "ova"],
+  nativeSortCriteria: ["rating", "updated", "added", "title"],
+  filters: [
+    {
+      name: "genre",
+      options: [
+        { id: "accion",              label: "Acción" },
+        { id: "artes-marciales",     label: "Artes Marciales" },
+        { id: "aventura",            label: "Aventuras" },
+        { id: "carreras",            label: "Carreras" },
+        { id: "ciencia-ficcion",     label: "Ciencia Ficción" },
+        { id: "comedia",             label: "Comedia" },
+        { id: "demencia",            label: "Demencia" },
+        { id: "demonios",            label: "Demonios" },
+        { id: "deportes",            label: "Deportes" },
+        { id: "drama",               label: "Drama" },
+        { id: "ecchi",               label: "Ecchi" },
+        { id: "escolares",           label: "Escolares" },
+        { id: "espacial",            label: "Espacial" },
+        { id: "fantasia",            label: "Fantasía" },
+        { id: "harem",               label: "Harem" },
+        { id: "historico",           label: "Histórico" },
+        { id: "infantil",            label: "Infantil" },
+        { id: "josei",               label: "Josei" },
+        { id: "juegos",              label: "Juegos" },
+        { id: "magia",               label: "Magia" },
+        { id: "mecha",               label: "Mecha" },
+        { id: "militar",             label: "Militar" },
+        { id: "misterio",            label: "Misterio" },
+        { id: "musica",              label: "Música" },
+        { id: "parodia",             label: "Parodia" },
+        { id: "policia",             label: "Policía" },
+        { id: "psicologico",         label: "Psicológico" },
+        { id: "recuentos-de-la-vida",label: "Recuentos de la vida" },
+        { id: "romance",             label: "Romance" },
+        { id: "samurai",             label: "Samurai" },
+        { id: "seinen",              label: "Seinen" },
+        { id: "shoujo",              label: "Shoujo" },
+        { id: "shounen",             label: "Shounen" },
+        { id: "sobrenatural",        label: "Sobrenatural" },
+        { id: "superpoderes",        label: "Superpoderes" },
+        { id: "suspenso",            label: "Suspenso" },
+        { id: "terror",              label: "Terror" },
+        { id: "vampiros",            label: "Vampiros" },
+        { id: "yaoi",                label: "Yaoi" },
+        { id: "yuri",                label: "Yuri" }
+      ]
+    },
+    {
+      name: "type",
+      options: [
+        { id: "tv",      label: "TV" },
+        { id: "movie",   label: "Película" },
+        { id: "special", label: "Especial" },
+        { id: "ova",     label: "OVA" }
+      ]
+    },
+    {
+      name: "order",
+      options: [
+        { id: "rating",  label: "Calificación" },
+        { id: "updated", label: "Recientemente actualizados" },
+        { id: "added",   label: "Recientemente agregados" },
+        { id: "title",   label: "Nombre A-Z" }
+      ]
+    }
+  ]
 };
 
 // Servidores que requieren extractor externo y no pueden reproducirse directamente
@@ -54,7 +121,20 @@ function parseAnimeItems(html, sourceBase) {
 
     // Tipo: solo si está explícitamente en el HTML
     let type = typeM ? typeM[1].trim() : null;
-    if (type && type.toLowerCase() === "ona") continue;  // Skip ONA items
+    if (type) {
+      const lowerType = type.toLowerCase();
+      if (lowerType === "tv" || lowerType === "anime") {
+        type = "Serie";
+      } else if (lowerType === "movie" || lowerType === "película" || lowerType === "pelicula") {
+        type = "Película";
+      } else if (lowerType === "ova") {
+        type = "OVA";
+      } else if (lowerType === "ona") {
+        continue; // Skip ONA items
+      } else if (lowerType === "special" || lowerType === "especial") {
+        type = "Especial";
+      }
+    }
 
     items.push({
       id: slug,
@@ -207,20 +287,20 @@ function fetchItemDetails(id) {
     : null;
 
   let type = typeM ? decodeHtml(typeM[1].trim()) : "Anime";
-  // Normalize to canonical types: TV, Movie, OVA, ONA, Special, Unknown
+  // Normalizar a tipos en español
   const lowerType = type.toLowerCase();
   if (lowerType === "tv" || lowerType === "anime") {
-    type = "TV";
-  } else if (lowerType === "movie") {
-    type = "Movie";
+    type = "Serie";
+  } else if (lowerType === "movie" || lowerType === "película" || lowerType === "pelicula") {
+    type = "Película";
   } else if (lowerType === "ova") {
     type = "OVA";
   } else if (lowerType === "special" || lowerType === "especial") {
-    type = "Special";
+    type = "Especial";
   } else if (lowerType === "ona") {
     type = "ONA";
   } else {
-    type = "Unknown";
+    type = "Desconocido";
   }
 
   // ── Relacionados ──────────────────────────────────────────

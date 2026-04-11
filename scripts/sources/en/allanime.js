@@ -11,7 +11,67 @@ const SOURCE = {
   language: "en",
   version: "1.0.0",
   iconUrl: "https://allmanga.to/favicon.ico",
-  contentKind: "anime"
+  contentKind: "anime",
+  nativeSortCriteria: ["rating", "added", "title", "name-desc"],
+  filters: [
+    {
+      name: "genre",
+      options: [
+        { id: "action",        label: "Action" },
+        { id: "adventure",     label: "Adventure" },
+        { id: "cars",          label: "Cars" },
+        { id: "comedy",        label: "Comedy" },
+        { id: "dementia",      label: "Dementia" },
+        { id: "demons",        label: "Demons" },
+        { id: "drama",         label: "Drama" },
+        { id: "ecchi",         label: "Ecchi" },
+        { id: "fantasy",       label: "Fantasy" },
+        { id: "game",          label: "Game" },
+        { id: "harem",         label: "Harem" },
+        { id: "historical",    label: "Historical" },
+        { id: "horror",        label: "Horror" },
+        { id: "isekai",        label: "Isekai" },
+        { id: "josei",         label: "Josei" },
+        { id: "kids",          label: "Kids" },
+        { id: "magic",         label: "Magic" },
+        { id: "martial-arts",  label: "Martial Arts" },
+        { id: "mecha",         label: "Mecha" },
+        { id: "military",      label: "Military" },
+        { id: "music",         label: "Music" },
+        { id: "mystery",       label: "Mystery" },
+        { id: "parody",        label: "Parody" },
+        { id: "police",        label: "Police" },
+        { id: "psychological", label: "Psychological" },
+        { id: "romance",       label: "Romance" },
+        { id: "samurai",       label: "Samurai" },
+        { id: "school",        label: "School" },
+        { id: "sci-fi",        label: "Sci-Fi" },
+        { id: "seinen",        label: "Seinen" },
+        { id: "shoujo",        label: "Shoujo" },
+        { id: "shoujo-ai",     label: "Shoujo Ai" },
+        { id: "shounen",       label: "Shounen" },
+        { id: "shounen-ai",    label: "Shounen Ai" },
+        { id: "slice-of-life", label: "Slice of Life" },
+        { id: "space",         label: "Space" },
+        { id: "sports",        label: "Sports" },
+        { id: "super-power",   label: "Super Power" },
+        { id: "supernatural",  label: "Supernatural" },
+        { id: "thriller",      label: "Thriller" },
+        { id: "vampire",       label: "Vampire" },
+        { id: "yaoi",          label: "Yaoi" },
+        { id: "yuri",          label: "Yuri" }
+      ]
+    },
+    {
+      name: "order",
+      options: [
+        { id: "rating",    label: "Top" },
+        { id: "added",     label: "Update" },
+        { id: "title",     label: "Name Asc" },
+        { id: "name-desc", label: "Name Desc" }
+      ]
+    }
+  ]
 };
 
 // Servidores deshabilitados (por problemas de calidad o publicidad)
@@ -223,9 +283,10 @@ const TYPE_MAP = {
 // Mapeo de orden de la UI a valores de AllAnime API
 // Basado en las URLs reales de AllAnime: sortBy=Top, sortBy=Latest_Update, sortBy=Name_ASC
 const ORDER_MAP = {
-  "rating": "Top",
-  "added": "Latest_Update",
-  "title": "Name_ASC"
+  "rating":    "Top",
+  "added":     "Latest_Update",
+  "title":     "Name_ASC",
+  "name-desc": "Name_DESC"
 };
 
 // Mapeo de géneros canónicos (minúsculas) a formato AllAnime (Title Case)

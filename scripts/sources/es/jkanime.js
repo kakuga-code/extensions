@@ -6,9 +6,79 @@ const SOURCE = {
   name: "JKanime",
   baseUrl: "https://jkanime.net",
   language: "es",
-  version: "1.1.4",
+  version: "1.1.5",
   iconUrl: "https://jkanime.net/favicon.ico",
-  contentKind: "anime"
+  contentKind: "anime",
+  supportedTypes: ["animes", "peliculas", "especiales", "ovas", "onas"],
+  nativeSortCriteria: ["popularidad", "nombre"],
+  filters: [
+    {
+      name: "genre",
+      options: [
+        { id: "accion",          label: "Acción" },
+        { id: "aventura",        label: "Aventura" },
+        { id: "autos",           label: "Autos" },
+        { id: "comedia",         label: "Comedia" },
+        { id: "dementia",        label: "Dementia" },
+        { id: "demonios",        label: "Demonios" },
+        { id: "drama",           label: "Drama" },
+        { id: "ecchi",           label: "Ecchi" },
+        { id: "fantasia",        label: "Fantasía" },
+        { id: "harem",           label: "Harem" },
+        { id: "historico",       label: "Histórico" },
+        { id: "isekai",          label: "Isekai" },
+        { id: "josei",           label: "Josei" },
+        { id: "juegos",          label: "Juegos" },
+        { id: "magia",           label: "Magia" },
+        { id: "artes-marciales", label: "Artes Marciales" },
+        { id: "mecha",           label: "Mecha" },
+        { id: "militar",         label: "Militar" },
+        { id: "misterio",        label: "Misterio" },
+        { id: "musica",          label: "Música" },
+        { id: "nios",            label: "Niños" },
+        { id: "parodia",         label: "Parodia" },
+        { id: "policial",        label: "Policial" },
+        { id: "psicologico",     label: "Psicológico" },
+        { id: "romance",         label: "Romance" },
+        { id: "samurai",         label: "Samurai" },
+        { id: "colegial",        label: "Colegial" },
+        { id: "sci-fi",          label: "Sci-Fi" },
+        { id: "seinen",          label: "Seinen" },
+        { id: "shoujo",          label: "Shoujo" },
+        { id: "shoujo-ai",       label: "Shoujo Ai" },
+        { id: "shounen",         label: "Shounen" },
+        { id: "shounen-ai",      label: "Shounen Ai" },
+        { id: "space",           label: "Space" },
+        { id: "deportes",        label: "Deportes" },
+        { id: "super-poderes",   label: "Super Poderes" },
+        { id: "sobrenatural",    label: "Sobrenatural" },
+        { id: "terror",          label: "Terror" },
+        { id: "thriller",        label: "Thriller" },
+        { id: "vampiros",        label: "Vampiros" },
+        { id: "yaoi",            label: "Yaoi" },
+        { id: "yuri",            label: "Yuri" },
+        { id: "cosas-de-la-vida",label: "Cosas de la vida" },
+        { id: "latino",          label: "Español Latino" }
+      ]
+    },
+    {
+      name: "type",
+      options: [
+        { id: "animes",    label: "Animes" },
+        { id: "peliculas", label: "Películas" },
+        { id: "especiales",label: "Especiales" },
+        { id: "ovas",      label: "OVAs" },
+        { id: "onas",      label: "ONAs" }
+      ]
+    },
+    {
+      name: "order",
+      options: [
+        { id: "popularidad", label: "Por popularidad" },
+        { id: "nombre",      label: "Por nombre (A-Z)" }
+      ]
+    }
+  ]
 };
 
 const DISABLED_SERVERS = ["filemoon","mega", "mega.nz", "mediafire", "zippyshare", "1fichier"];
@@ -217,16 +287,16 @@ function fetchDirectory(url, defaultType) {
       if (type) {
         const lowerType = type.toLowerCase();
         // Reconocer tanto formas singulares como plurales (jkanime puede usar ambas)
-        if (lowerType === "serie" ||lowerType === "anime" || lowerType === "animes" || lowerType === "tv") {
-          type = "TV";
+        if (lowerType === "serie" || lowerType === "anime" || lowerType === "animes" || lowerType === "tv") {
+          type = "Serie";
         } else if (lowerType === "pelicula" || lowerType === "peliculas" || lowerType === "película" || lowerType === "movie") {
-          type = "Movie";
+          type = "Película";
         } else if (lowerType === "ova" || lowerType === "ovas") {
           type = "OVA";
         } else if (lowerType === "ona" || lowerType === "onas") {
           type = "ONA";
         } else if (lowerType === "especial" || lowerType === "especiales" || lowerType === "special") {
-          type = "Special";
+          type = "Especial";
         } else {
           type = null;  // Si no es un tipo reconocido, dejar null
         }

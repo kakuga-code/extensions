@@ -8,7 +8,27 @@ const SOURCE = {
   language: "es",
   version: "1.0.0",
   iconUrl: "https://gnula.life/favicon.ico",
-  contentKind: "peliculas" 
+  contentKind: "peliculas",
+  supportedTypes: ["tv", "movie"],
+  filters: [
+    {
+      name: "genre",
+      options: [
+        { id: "action",    label: "Acción" },
+        { id: "animation", label: "Animación" },
+        { id: "crime",     label: "Crimen" },
+        { id: "family",    label: "Família" },
+        { id: "mystery",   label: "Misterio" },
+        { id: "thriller",  label: "Suspenso" },
+        { id: "adventure", label: "Aventura" },
+        { id: "sci-fi",    label: "Ciencia Ficción" },
+        { id: "drama",     label: "Drama" },
+        { id: "fantasy",   label: "Fantasía" },
+        { id: "romance",   label: "Romance" },
+        { id: "horror",    label: "Terror" }
+      ]
+    }
+  ]
 };
 
 const DISABLED_SERVERS = ["filemoon","netu","doodstream","mega", "mega.nz", "mediafire", "zippyshare", "1fichier"];
