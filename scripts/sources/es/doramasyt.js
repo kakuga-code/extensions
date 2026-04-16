@@ -276,41 +276,73 @@ function decodeB64(str) {
   return out;
 }
 
+var AJAX_HEADERS = {
+  "accept": "application/json, text/javascript, */*; q=0.01",
+  "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+  "origin": SOURCE.baseUrl,
+  "x-requested-with": "XMLHttpRequest"
+};
+
+function encodeFormBody(params) {
+  return Object.keys(params).map(function (k) {
+    return encodeURIComponent(k) + "=" + encodeURIComponent(params[k]);
+  }).join("&");
+}
+
 function fetchChildren(itemId) {
   var pageUrl = /^https?:\/\//i.test(itemId) ? itemId : normalizeUrl(itemId);
   var html = getHtml(pageUrl);
+  if (!html) return [];
 
-  // Extract series slug to filter only this series' episodes
-  // e.g. /dorama/bloodhounds-sub-espanol => "bloodhounds"
-  var pathM = pageUrl.match(/\/dorama\/([^\/\?#]+)/i);
-  var seriesSlug = pathM ? pathM[1].replace(/-sub-espa[^\s\/]*/i, "").replace(/-+$/, "") : "";
+  // Extract CSRF token
+  var csrfM = html.match(/<meta[^>]+name="csrf-token"[^>]+content="([^"]+)"/i);
+  if (!csrfM) {
+    console.log("[doramasyt] fetchChildren: no CSRF token found");
+    return [];
+  }
+  var csrf = csrfM[1];
 
-  var episodes = [];
-  var seen = {};
+  // Extract AJAX URL from caplist section
+  var ajaxM = html.match(/class="caplist"[^>]+data-ajax="([^"]+)"/i);
+  if (!ajaxM) {
+    console.log("[doramasyt] fetchChildren: no data-ajax URL found");
+    return [];
+  }
+  var ajaxUrl = ajaxM[1];
+  var refHeaders = Object.assign({}, AJAX_HEADERS, { "referer": pageUrl });
 
-  if (seriesSlug) {
-    var escapedSlug = seriesSlug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    var re = new RegExp('href="([^"]*\\/ver\\/' + escapedSlug + '-episodio-([\\d]+(?:\\.[\\d]+)?)[^"]*)"', "gi");
-    var m;
-    while ((m = re.exec(html)) !== null) {
-      var epUrl = normalizeUrl(m[1]);
-      if (!epUrl || seen[epUrl]) continue;
-      seen[epUrl] = true;
-      var num = parseFloat(m[2]);
-      episodes.push({ id: epUrl, number: num, title: "Capítulo " + num, pageUrl: epUrl });
-    }
+  // First POST: get episode numbers + paginate_url
+  var metaStr = http.post(ajaxUrl, encodeFormBody({ "_token": csrf }), refHeaders);
+  if (!metaStr) return [];
+  var meta;
+  try { meta = JSON.parse(metaStr); } catch (e) {
+    console.log("[doramasyt] fetchChildren: failed to parse meta JSON: " + e);
+    return [];
   }
 
-  // Fallback: match any /ver/*-episodio-N link in the page
-  if (episodes.length === 0) {
-    var reAll = /href="([^"]*\/ver\/[^"]*-episodio-([\d]+(?:\.[\d]+)?)[^"]*)"/gi;
-    var ma;
-    while ((ma = reAll.exec(html)) !== null) {
-      var epUrlA = normalizeUrl(ma[1]);
-      if (!epUrlA || seen[epUrlA]) continue;
-      seen[epUrlA] = true;
-      var numA = parseFloat(ma[2]);
-      episodes.push({ id: epUrlA, number: numA, title: "Capítulo " + numA, pageUrl: epUrlA });
+  var eps = meta.eps || [];
+  var perpage = parseInt(meta.perpage, 10) || 50;
+  var paginateUrl = meta.paginate_url;
+  if (!paginateUrl || eps.length === 0) return [];
+
+  var totalPages = Math.ceil(eps.length / perpage);
+  var episodes = [];
+
+  for (var p = 1; p <= totalPages; p++) {
+    var pageStr = http.post(paginateUrl, encodeFormBody({ "_token": csrf, "p": String(p) }), refHeaders);
+    if (!pageStr) continue;
+    var pageData;
+    try { pageData = JSON.parse(pageStr); } catch (e) {
+      console.log("[doramasyt] fetchChildren: failed to parse page " + p + " JSON: " + e);
+      continue;
+    }
+    var caps = pageData.caps || [];
+    for (var i = 0; i < caps.length; i++) {
+      var cap = caps[i];
+      var epUrl = normalizeUrl(cap.url);
+      if (!epUrl) continue;
+      var num = parseFloat(cap.episodio);
+      episodes.push({ id: epUrl, number: num, title: "Capítulo " + num, pageUrl: epUrl });
     }
   }
 
