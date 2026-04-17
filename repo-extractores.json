@@ -1,0 +1,210 @@
+{
+  "version": 1,
+  "extractors": [
+    {
+      "id": "doodstream",
+      "name": "Doodstream",
+      "version": "1.0.0",
+      "domains": [
+        "doodstream.com",
+        "www.doodstream.com",
+        "dood.to",
+        "dood.wf",
+        "dood.ws",
+        "dood.pm",
+        "dood.cx",
+        "dood.sh",
+        "dood.la",
+        "dood.re",
+        "dood.watch",
+        "doodstream.co",
+        "doodstream.net",
+        "dsvplay.com",
+        "playmogo.com",
+        "www.playmogo.com",
+        "d-s.io"
+      ],
+      "scriptUrl": "https://raw.githubusercontent.com/kakuga-code/extensions/main/scripts/extractors/doodstream.js"
+    },
+    {
+      "id": "jkplayer",
+      "name": "JKPlayer",
+      "version": "1.0.0",
+      "domains": [
+        "jkanime.net",
+        "www.jkanime.net"
+      ],
+      "scriptUrl": "https://raw.githubusercontent.com/kakuga-code/extensions/main/scripts/extractors/jkplayer.js"
+    },
+    {
+      "id": "megacloud",
+      "name": "MegaCloud",
+      "version": "1.4.0",
+      "domains": [
+        "megacloud.blog",
+        "megacloud.tv",
+        "megacloud.net",
+        "rabbitstream.net",
+        "vizcloud.co",
+        "vizcloud2.online",
+        "vizcloud3.online",
+        "dokicloud.one",
+        "vizcloud.online"
+      ],
+      "scriptUrl": "https://raw.githubusercontent.com/kakuga-code/extensions/main/scripts/extractors/megacloud.js"
+    },
+    {
+      "id": "mixdrop",
+      "name": "MixDrop",
+      "version": "1.0.0",
+      "domains": [
+        "mixdrop.co",
+        "mixdrop.to",
+        "mixdrop.ag",
+        "mixdrop.sx",
+        "mixdrop.bz",
+        "mixdrop.ch",
+        "mixdrop.club",
+        "mixdrop.gl",
+        "mixdrop.vc",
+        "mixdrop24.com",
+        "mixdrop.top",
+        "mdy48tn97.com",
+        "mdbekjwqa.pw",
+        "mxdrop.to"
+      ],
+      "scriptUrl": "https://raw.githubusercontent.com/kakuga-code/extensions/main/scripts/extractors/mixdrop.js"
+    },
+    {
+      "id": "mp4upload",
+      "name": "Mp4Upload",
+      "version": "1.0.0",
+      "domains": [
+        "mp4upload.com",
+        "www.mp4upload.com",
+        "mp4upload.to",
+        "mp4upload.net"
+      ],
+      "scriptUrl": "https://raw.githubusercontent.com/kakuga-code/extensions/main/scripts/extractors/mp4upload.js"
+    },
+    {
+      "id": "okru",
+      "name": "Okru",
+      "version": "1.0.0",
+      "domains": [
+        "ok.ru",
+        "odnoklassniki.ru"
+      ],
+      "scriptUrl": "https://raw.githubusercontent.com/kakuga-code/extensions/main/scripts/extractors/okru.js"
+    },
+    {
+      "id": "streamtape",
+      "name": "StreamTape",
+      "version": "1.0.0",
+      "domains": [
+        "streamtape.com",
+        "streamtape.net",
+        "streamtape.xyz",
+        "streamtape.to",
+        "streamtape.cc",
+        "shavetape.cash"
+      ],
+      "scriptUrl": "https://raw.githubusercontent.com/kakuga-code/extensions/main/scripts/extractors/streamtape.js"
+    },
+    {
+      "id": "streamwish",
+      "name": "StreamWish",
+      "version": "1.0.0",
+      "domains": [
+        "streamwish.com",
+        "streamwish.to",
+        "streamwish.site",
+        "wishembed.pro",
+        "awish.pro",
+        "dwish.pro",
+        "strmwish.com",
+        "fwish.pro",
+        "fviplions.com",
+        "sfastwish.com",
+        "egywish.com",
+        "arabwish.com",
+        "mwish.pro",
+        "strwish.com",
+        "swdyu.com",
+        "swhhd.com",
+        "vidhidevip.com"
+      ],
+      "scriptUrl": "https://raw.githubusercontent.com/kakuga-code/extensions/main/scripts/extractors/streamwish.js"
+    },
+    {
+      "id": "uqload",
+      "name": "Uqload",
+      "version": "1.0.0",
+      "domains": [
+        "uqload.is",
+        "uqload.co",
+        "uqload.com",
+        "uqload.to",
+        "uqload.ws"
+      ],
+      "scriptUrl": "https://raw.githubusercontent.com/kakuga-code/extensions/main/scripts/extractors/uqload.js"
+    },
+    {
+      "id": "vidnest",
+      "name": "VidNest",
+      "version": "1.0.0",
+      "domains": [
+        "vidnest.io",
+        "vidnest.pro"
+      ],
+      "scriptUrl": "https://raw.githubusercontent.com/kakuga-code/extensions/main/scripts/extractors/vidnest.js"
+    },
+    {
+      "id": "vidsrc",
+      "name": "VidSrc",
+      "version": "2.0.0",
+      "domains": [
+        "megacloud.blog",
+        "vidsrc.me",
+        "vidsrc.to",
+        "vidsrc.xyz",
+        "vidsrc.net",
+        "vidsrc.in",
+        "vidsrc.pm",
+        "vidsrc.am",
+        "2embed.to",
+        "2embed.cc",
+        "2embed.me"
+      ],
+      "scriptUrl": "https://raw.githubusercontent.com/kakuga-code/extensions/main/scripts/extractors/vidsrc.js"
+    },
+    {
+      "id": "voe",
+      "name": "VOE",
+      "version": "1.0.1",
+      "domains": [
+        "voe.sx",
+        "voe-storage.com",
+        "voe.observer",
+        "voe.casa",
+        "voe.com",
+        "reputationsfaintly.com",
+        "thepizzatime.com",
+        "jefferycontrolmodel.com"
+      ],
+      "scriptUrl": "https://raw.githubusercontent.com/kakuga-code/extensions/main/scripts/extractors/voe.js"
+    },
+    {
+      "id": "yourupload",
+      "name": "YourUpload",
+      "version": "1.0.0",
+      "domains": [
+        "yourupload.com",
+        "www.yourupload.com",
+        "yourupload.to",
+        "yourupload.net"
+      ],
+      "scriptUrl": "https://raw.githubusercontent.com/kakuga-code/extensions/main/scripts/extractors/yourupload.js"
+    }
+  ]
+}
