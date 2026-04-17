@@ -9,9 +9,10 @@ const SOURCE = {
   baseUrl: "https://allmanga.to",
   apiUrl: "https://api.allanime.day/api",
   language: "en",
-  version: "1.0.0",
+  version: "1.0.2",
   iconUrl: "https://allmanga.to/favicon.ico",
   contentKind: "anime",
+  extractorRepositoryUrl: "https://raw.githubusercontent.com/kakuga-code/extensions/refs/heads/main/repo-extractores.json",
   nativeSortCriteria: ["rating", "added", "title", "name-desc"],
   filters: [
     {
@@ -75,10 +76,11 @@ const SOURCE = {
 };
 
 // Servidores deshabilitados (por problemas de calidad o publicidad)
-const DISABLED_SERVERS = ["filemoon", "mega", "mega.nz", "mediafire", "zippyshare", "1fichier", "allanime", "yt-mp4", "s-mp4", "luf-mp4"];
+const DISABLED_SERVERS = ["filemoon", "mega", "mega.nz", "mediafire", "zippyshare", "1fichier"];
 
 const PAGE_SIZE = 26;
 const THUMBNAIL_PROXY = "https://wp.youtube-anime.com/{0}?w=250";
+const ALLANIME_EMBED_BASE = "https://allanime.day";
 
 // ── GraphQL Queries ──────────────────────────────────────
 
@@ -181,6 +183,14 @@ function thumbnailUrl(url) {
   return THUMBNAIL_PROXY.replace("{0}", "aln.youtube-anime.com/" + url);
 }
 
+function absoluteStreamUrl(url) {
+  if (!url || typeof url !== "string") return url;
+  if (url.startsWith("http://") || url.startsWith("https://")) return url;
+  if (url.startsWith("//")) return "https:" + url;
+  if (url.startsWith("/")) return ALLANIME_EMBED_BASE + url;
+  return url;
+}
+
 function buildGraphQLRequest(query, variables) {
   const payload = JSON.stringify({ query: query, variables: variables });
   return http.post(SOURCE.apiUrl, payload, {
@@ -189,6 +199,31 @@ function buildGraphQLRequest(query, variables) {
     "Origin": SOURCE.baseUrl,
     "Referer": SOURCE.baseUrl + "/"
   });
+}
+
+function parseGraphQLResponse(respStr) {
+  var data = JSON.parse(respStr);
+
+  // AllAnime cifra algunas respuestas de GraphQL en data.tobeparsed. El
+  // frontend oficial lo abre con AES-GCM usando esta clave fija invertida.
+  if (data && data.data && data.data.tobeparsed) {
+    try {
+      var key = "P7K2RGbFgauVtmiS".split("").reverse().join("");
+      var decrypted = (typeof crypto !== "undefined" && crypto.aesGcmDecryptBase64)
+        ? crypto.aesGcmDecryptBase64(data.data.tobeparsed, key)
+        : "";
+      if (decrypted) {
+        data.data = JSON.parse(decrypted);
+        console.log("[allanime] Respuesta cifrada descifrada: " + Object.keys(data.data).join(", "));
+      } else {
+        console.log("[allanime] No se pudo descifrar tobeparsed");
+      }
+    } catch(e) {
+      console.log("[allanime] Error descifrando tobeparsed: " + e);
+    }
+  }
+
+  return data;
 }
 
 function parseAnimeFromEdges(edges) {
@@ -226,7 +261,7 @@ function fetchPopular(page) {
   
   try {
     const respStr = buildGraphQLRequest(POPULAR_QUERY, variables);
-    const data = JSON.parse(respStr);
+    const data = parseGraphQLResponse(respStr);
     
     if (data.data && data.data.queryPopular && data.data.queryPopular.recommendations) {
       const edges = data.data.queryPopular.recommendations
@@ -256,7 +291,7 @@ function fetchLatest(page) {
   
   try {
     const respStr = buildGraphQLRequest(SEARCH_QUERY, variables);
-    const data = JSON.parse(respStr);
+    const data = parseGraphQLResponse(respStr);
     
     if (data.data && data.data.shows && data.data.shows.edges) {
       return {
@@ -415,7 +450,7 @@ function fetchSearch(query, page, filters) {
   
   try {
     const respStr = buildGraphQLRequest(SEARCH_QUERY, variables);
-    const data = JSON.parse(respStr);
+    const data = parseGraphQLResponse(respStr);
     
     if (data.data && data.data.shows && data.data.shows.edges) {
       return {
@@ -441,7 +476,7 @@ function fetchItemDetails(id) {
   
   try {
     const respStr = buildGraphQLRequest(DETAILS_QUERY, variables);
-    const data = JSON.parse(respStr);
+    const data = parseGraphQLResponse(respStr);
     
     if (data.data && data.data.show) {
       const show = data.data.show;
@@ -497,7 +532,7 @@ function fetchChildren(itemId) {
   
   try {
     const respStr = buildGraphQLRequest(EPISODES_QUERY, variables);
-    const data = JSON.parse(respStr);
+    const data = parseGraphQLResponse(respStr);
     
     if (data.data && data.data.show) {
       const show = data.data.show;
@@ -632,7 +667,7 @@ function fetchVideoList(episodeId) {
     
     console.log("[allanime] Response length: " + (respStr ? respStr.length : 0));
     
-    var data = JSON.parse(respStr);
+    var data = parseGraphQLResponse(respStr);
     
     // Log de errores de GraphQL
     if (data.errors) {
@@ -677,7 +712,10 @@ function fetchVideoList(episodeId) {
         // Desencriptar URLs que empiezan con "-"
         if (videoUrl.startsWith("-")) {
           videoUrl = decryptSource(videoUrl);
+          videoUrl = absoluteStreamUrl(videoUrl);
           console.log("[allanime] URL desencriptada[" + idx + "]: " + videoUrl.substring(0, 80));
+        } else {
+          videoUrl = absoluteStreamUrl(videoUrl);
         }
         
         // Obtener nombre del servidor usando detección por sourceName y URL
@@ -735,7 +773,7 @@ function fetchVideoList(episodeId) {
 function decryptSource(str) {
   if (!str.startsWith("-")) return str;
   
-  const hexPart = str.substring(1);
+  const hexPart = str.startsWith("--") ? str.substring(2) : str.substring(1);
   let result = "";
   
   for (let i = 0; i < hexPart.length; i += 2) {

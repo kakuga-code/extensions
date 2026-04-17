@@ -6,9 +6,10 @@ const SOURCE = {
   name: "Gnula",
   baseUrl: "https://gnula.life",
   language: "es",
-  version: "1.0.0",
+  version: "1.0.1",
   iconUrl: "https://gnula.life/favicon.ico",
   contentKind: "peliculas",
+  extractorRepositoryUrl: "https://raw.githubusercontent.com/kakuga-code/extensions/refs/heads/main/repo-extractores.json",
   supportedTypes: ["tv", "movie"],
   filters: [
     {

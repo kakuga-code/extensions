@@ -9,6 +9,7 @@ const SOURCE = {
   version: "1.1.1",
   iconUrl: "https://www3.animeflv.net/favicon.ico",
   contentKind: "anime",
+  extractorRepositoryUrl: "https://raw.githubusercontent.com/kakuga-code/extensions/refs/heads/main/repo-extractores.json",
   supportedTypes: ["tv", "movie", "special", "ova"],
   nativeSortCriteria: ["rating", "updated", "added", "title"],
   filters: [
@@ -79,7 +80,10 @@ const SOURCE = {
 };
 
 // Servidores que requieren extractor externo y no pueden reproducirse directamente
-const DISABLED_SERVERS = ["netu","mega", "mega.nz", "mediafire", "zippyshare", "1fichier"];
+const DISABLED_SERVERS = [
+  "netu", "mega", "mega.nz", "mediafire", "zippyshare", "1fichier",
+  "filemoon", "fmoon", "moon"
+];
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -329,6 +333,7 @@ function fetchItemDetails(id) {
     title: titleM ? decodeHtml(titleM[1].replace(/<[^>]+>/g, "").trim()) : id,
     synopsis: synopsisM ? decodeHtml(synopsisM[1].replace(/<[^>]+>/g, "").trim()) : "",
     cover: cover,
+    pageUrl: "https://animeflv.net/anime/" + id,
     genres: genres,
     type: type,
     status: statusM ? decodeHtml(statusM[1].trim()) : null,

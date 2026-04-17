@@ -6,9 +6,10 @@ const SOURCE = {
   name: "Doramasyt",
   baseUrl: "https://www.doramasyt.com",
   language: "es",
-  version: "1.0.1",
+  version: "1.0.2",
   iconUrl: "https://www.doramasyt.com/favicon.ico",
-  contentKind: "anime",
+  contentKind: "doramas",
+  extractorRepositoryUrl: "https://raw.githubusercontent.com/kakuga-code/extensions/refs/heads/main/repo-extractores.json",
   typeFilterKey: "category",
   filters: [
     {

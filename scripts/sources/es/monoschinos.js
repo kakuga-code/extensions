@@ -7,9 +7,11 @@ const SOURCE = {
   name: "MonosChinos",
   baseUrl: "https://vww.monoschinos2.net",
   language: "es",
-  version: "1.0.0",
+  version: "1.0.2",
   iconUrl: "https://vww.monoschinos2.net/favicon.ico",
   contentKind: "anime",
+  extractorRepositoryUrl: "https://raw.githubusercontent.com/kakuga-code/extensions/refs/heads/main/repo-extractores.json",
+  supportsPopular: false,
   supportedTypes: ["anime", "audio-japones", "corto", "donghua", "especial", "ona", "ova", "pelicula", "pelicula-1080p", "sin-censura", "tv"],
   filters: [
     {
@@ -120,7 +122,7 @@ const AJAX_HEADERS = {
 };
 
 // Servidores no soportados por el extractor nativo
-const DISABLED_SERVERS = ["mega", "mega.nz", "mediafire", "zippyshare", "1fichier"];
+const DISABLED_SERVERS = ["mega", "mega.nz", "mediafire", "zippyshare", "1fichier", "filemoon", "FILEMOON"];
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -507,7 +509,7 @@ function fetchVideoList(episodeId) {
       try { decoded = b64Decode(encoded); } catch (e) { continue; }
       if (!decoded || decoded.length < 4) continue;
       var serverName = detectServer(decoded);
-      if (DISABLED_SERVERS.indexOf(serverName) !== -1) continue;
+      if (DISABLED_SERVERS.indexOf(serverName.toLowerCase()) !== -1) continue;
       results.push({
         url: decoded,
         server: serverName,

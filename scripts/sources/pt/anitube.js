@@ -6,9 +6,10 @@ const SOURCE = {
   name: "AniTube",
   baseUrl: "https://www.anitube.news",
   language: "pt-BR",
-  version: "1.0.0",
+  version: "1.0.1",
   iconUrl: "https://www.anitube.news/wp-content/uploads/cropped-Favicon6-32x32.png",
   contentKind: "anime",
+  extractorRepositoryUrl: "https://raw.githubusercontent.com/kakuga-code/extensions/refs/heads/main/repo-extractores.json",
   filters: [
     {
       name: "genre",

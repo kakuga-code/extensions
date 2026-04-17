@@ -6,9 +6,10 @@ const SOURCE = {
   name: "JKanime",
   baseUrl: "https://jkanime.net",
   language: "es",
-  version: "1.1.5",
+  version: "1.1.6",
   iconUrl: "https://jkanime.net/favicon.ico",
   contentKind: "anime",
+  extractorRepositoryUrl: "https://raw.githubusercontent.com/kakuga-code/extensions/refs/heads/main/repo-extractores.json",
   supportedTypes: ["animes", "peliculas", "especiales", "ovas", "onas"],
   nativeSortCriteria: ["popularidad", "nombre"],
   filters: [
@@ -81,7 +82,7 @@ const SOURCE = {
   ]
 };
 
-const DISABLED_SERVERS = ["filemoon","mega", "mega.nz", "mediafire", "zippyshare", "1fichier"];
+const DISABLED_SERVERS = ["filemoon", "mega", "mega.nz", "mediafire", "zippyshare", "1fichier"];
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -158,6 +159,19 @@ function decodeBase64MediaUrl(encoded) {
   return null;
 }
 
+function getOrigin(url) {
+  const match = (url || "").match(/^(https?:\/\/[^/]+)/i);
+  return match ? match[1] : SOURCE.baseUrl;
+}
+
+function absoluteUrl(url, baseUrl) {
+  if (!url) return null;
+  if (url.indexOf("http://") === 0 || url.indexOf("https://") === 0) return url;
+  if (url.indexOf("//") === 0) return "https:" + url;
+  if (url.charAt(0) === "/") return getOrigin(baseUrl) + url;
+  return baseUrl.substring(0, baseUrl.lastIndexOf("/") + 1) + url;
+}
+
 function extractJKPlayerStreamUrl(html) {
   if (!html) return null;
 
@@ -190,6 +204,94 @@ function extractJKPlayerStreamUrl(html) {
   }
 
   return null;
+}
+
+function parseJKPlaylistVariants(masterUrl, headers) {
+  try {
+    const playlist = http.get(masterUrl, headers);
+    if (!playlist || playlist.indexOf("#EXTM3U") === -1 || playlist.indexOf("#EXT-X-STREAM-INF") === -1) {
+      return [{ url: masterUrl, quality: "Auto", headers: headers }];
+    }
+
+    const results = [];
+    const lines = playlist.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line.indexOf("#EXT-X-STREAM-INF") !== 0) continue;
+
+      const nextLine = lines[i + 1] ? lines[i + 1].trim() : "";
+      if (!nextLine || nextLine.indexOf("#") === 0) continue;
+
+      const resolutionMatch = line.match(/RESOLUTION=(\d+x\d+)/i);
+      const bandwidthMatch = line.match(/BANDWIDTH=(\d+)/i);
+      const quality = resolutionMatch
+        ? resolutionMatch[1]
+        : (bandwidthMatch ? Math.round(parseInt(bandwidthMatch[1], 10) / 1000) + "k" : "Auto");
+
+      results.push({
+        url: absoluteUrl(nextLine, masterUrl),
+        quality: quality,
+        headers: headers
+      });
+    }
+
+    return results.length > 0 ? results : [{ url: masterUrl, quality: "Auto", headers: headers }];
+  } catch (e) {
+    console.log("[jkanime] No se pudo parsear playlist interno: " + e);
+    return [{ url: masterUrl, quality: "Auto", headers: headers }];
+  }
+}
+
+function extractJKInternalOptions(urlOrPath, serverName, lang) {
+  try {
+    const playerUrl = urlOrPath.startsWith("http") ? urlOrPath : SOURCE.baseUrl + "/" + urlOrPath;
+    console.log("[jkanime] Fetching internal player: " + playerUrl);
+
+    const headers = {
+      "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
+      "Referer": playerUrl,
+      "Origin": getOrigin(playerUrl)
+    };
+
+    const playerHtml = http.get(playerUrl, headers);
+    let streamUrl = extractJKPlayerStreamUrl(playerHtml);
+
+    if (!streamUrl) {
+      const paramsM = playerUrl.match(/\?(.+)/);
+      if (paramsM) {
+        const apiUrl = SOURCE.baseUrl + "/stream/jkmov.php?" + paramsM[1];
+        console.log("[jkanime] Intentando API jkmov: " + apiUrl);
+        const apiResp = http.get(apiUrl, headers);
+        try {
+          const json = JSON.parse(apiResp);
+          streamUrl = json.stream || json.file || json.url || json.source || null;
+        } catch(e) {
+          const rawM = apiResp && apiResp.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)['"]/);
+          if (rawM) streamUrl = rawM[1];
+        }
+      }
+    }
+
+    if (!streamUrl) {
+      console.log("[jkanime] No se pudo resolver servidor interno: " + serverName);
+      return [];
+    }
+
+    streamUrl = absoluteUrl(streamUrl, playerUrl);
+    console.log("[jkanime] stream interno " + serverName + ": " + streamUrl);
+
+    return parseJKPlaylistVariants(streamUrl, headers).map(function(option) {
+      return {
+        url: option.url,
+        server: serverName,
+        quality: lang + " — " + serverName + (option.quality && option.quality !== "Auto" ? " " + option.quality : ""),
+        headers: option.headers || headers
+      };
+    });
+  } catch(e) {
+    console.log("[jkanime] Error resolviendo interno " + serverName + ": " + e);
+    return [];
+  }
 }
 
 function parseDirectoryItemsFromHtml(html, defaultType) {
@@ -838,9 +940,9 @@ function fetchVideoList(episodeId) {
                               const parsed = new URL(url);
                               if (parsed.hostname === "jkanime.net" || parsed.hostname.endsWith(".jkanime.net")) {
                                   console.log("[jkanime] Servidor interno " + serverLabel + " url=" + url);
-                                  const streamUrl = resolveJKInternal(url, serverLabel);
-                                  if (streamUrl) {
-                                      results.push({ url: streamUrl, server: serverLabel, quality: lang + " — " + serverLabel });
+                                  const internalOptions = extractJKInternalOptions(url, serverLabel, lang);
+                                  if (internalOptions.length > 0) {
+                                      internalOptions.forEach(function(option) { results.push(option); });
                                   } else {
                                       results.push({ embed: url, server: serverLabel, quality: lang + " — " + serverLabel });
                                   }
@@ -883,13 +985,9 @@ function fetchVideoList(episodeId) {
                   const internalPath = url.replace("/jk.php?u=", "");
                   const internalUrl = SOURCE.baseUrl + "/" + internalPath;
                   console.log("[jkanime] Servidor interno " + serverNameStr + " url=" + internalUrl);
-                  const streamUrl = resolveJKInternal(internalUrl, serverNameStr);
-                  if (streamUrl) {
-                      results.push({
-                          url: streamUrl,
-                          server: serverNameStr,
-                          quality: lang + " — " + serverNameStr
-                      });
+                  const internalOptions = extractJKInternalOptions(internalUrl, serverNameStr, lang);
+                  if (internalOptions.length > 0) {
+                      internalOptions.forEach(function(option) { results.push(option); });
                   } else {
                       results.push({
                           embed: internalUrl,
