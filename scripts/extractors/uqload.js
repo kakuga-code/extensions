@@ -3,6 +3,7 @@
 
 const EXTRACTOR = {
   id: "uqload",
+  aliases: ["uq", "uqload"],
   name: "Uqload",
   version: "1.0.0",
   domains: [

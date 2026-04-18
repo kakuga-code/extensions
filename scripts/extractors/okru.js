@@ -3,6 +3,7 @@
 
 const EXTRACTOR = {
   id: "okru",
+  aliases: ["ok", "okru"],
   name: "Okru",
   version: "1.0.0",
   domains: [

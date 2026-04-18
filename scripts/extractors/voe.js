@@ -3,6 +3,7 @@
 
 const EXTRACTOR = {
   id: "voe",
+  aliases: ["voe"],
   name: "VOE",
   version: "1.0.1",
   domains: [

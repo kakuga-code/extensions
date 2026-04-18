@@ -5,6 +5,7 @@ const EXTRACTOR = {
   id: "streamwish",
   name: "StreamWish",
   version: "1.0.0",
+  aliases: ["sw", "swish", "streamwish", "wishembed", "sfastwish", "strwish"],
   domains: [
     "streamwish.com",
     "streamwish.to",

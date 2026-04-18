@@ -3,6 +3,7 @@
 
 const EXTRACTOR = {
   id: "yourupload",
+  aliases: ["yt", "yu", "yourupload"],
   name: "YourUpload",
   version: "1.0.0",
   domains: [

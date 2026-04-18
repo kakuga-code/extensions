@@ -3,6 +3,7 @@
 
 const EXTRACTOR = {
   id: "mixdrop",
+  aliases: ["mx", "md", "mixdrop"],
   name: "MixDrop",
   version: "1.0.0",
   domains: [

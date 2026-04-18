@@ -5,6 +5,7 @@ const EXTRACTOR = {
   id: "streamtape",
   name: "StreamTape",
   version: "1.0.0",
+  aliases: ["stape", "streamtp", "streamtape"],
   domains: [
     "streamtape.com",
     "streamtape.net",

@@ -3,6 +3,7 @@
 
 const EXTRACTOR = {
   id: "mp4upload",
+  aliases: ["mp4", "mp4u", "mp4upload"],
   name: "Mp4Upload",
   version: "1.0.0",
   domains: [
