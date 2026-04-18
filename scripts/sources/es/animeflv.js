@@ -158,6 +158,31 @@ function hasNextPage(html) {
   return html.includes('rel="next"') || html.includes("»");
 }
 
+// Mapa de nombres de servidor de AnimeFLV → id canónico del extractor
+const SERVER_NAME_MAP = {
+  "sw":         "streamwish",
+  "swish":      "streamwish",
+  "stape":      "streamtape",
+  "streamtp":   "streamtape",
+  "mp4":        "mp4upload",
+  "mp4u":       "mp4upload",
+  "ok":         "okru",
+  "dood":       "doodstream",
+  "ds":         "doodstream",
+  "fm":         "filemoon",
+  "yt":         "yourupload",
+  "yu":         "yourupload",
+  "mx":         "mixdrop",
+  "md":         "mixdrop",
+  "vn":         "vidnest",
+  "vs":         "vidsrc",
+};
+
+function canonicalServerName(raw) {
+  const key = (raw || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  return SERVER_NAME_MAP[key] || key;
+}
+
 // Extrae el bloque JSON de `var videos = {...}` de forma robusta
 // buscando llaves balanceadas en lugar de un regex simple
 function extractVideosJSON(html) {
@@ -396,10 +421,10 @@ function fetchVideoList(episodeId) {
       const directUrl = v.url || null;  // URL directa (mp4/m3u8 o embed con extractor)
       const embedUrl = v.code || null;  // URL embed (requiere WebView si no hay extractor)
       if (!directUrl && !embedUrl) return;
-      const serverName = (v.server || v.title || "unknown").toLowerCase();
+      const rawServer = (v.server || v.title || "unknown");
+      const serverName = canonicalServerName(rawServer);
+      console.log("[animeflv] server raw='" + rawServer + "' -> canonical='" + serverName + "'");
       if (DISABLED_SERVERS.indexOf(serverName) !== -1) return;
-      // Si tiene URL directa, usarla como url (el extractor la intentará resolver)
-      // Si solo tiene code/embed, marcarlo como embed para WebView fallback
       if (directUrl) {
         results.push({
           url: directUrl,
