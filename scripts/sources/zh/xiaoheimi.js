@@ -9,6 +9,7 @@ const SOURCE = {
   version: "1.0.0",
   iconUrl: "https://xiaoheimi.cc/favicon.ico",
   contentKind: "anime",
+  extractorRepositoryUrl: "https://raw.githubusercontent.com/kakuga-code/extensions/refs/heads/main/repo-extractores.json",
   supportedTypes: ["tv", "movie"],
   supportsPopular: false
 };

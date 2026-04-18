@@ -9,6 +9,7 @@ const SOURCE = {
   version: "1.0.0",
   iconUrl: "https://anime-sama.to/img/icon.png",
   contentKind: "anime",
+  extractorRepositoryUrl: "https://raw.githubusercontent.com/kakuga-code/extensions/refs/heads/main/repo-extractores.json",
   supportedTypes: ["Anime", "Film", "Autres"],
   supportsPopular: false,
   filters: [
