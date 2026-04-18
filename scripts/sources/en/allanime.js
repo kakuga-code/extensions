@@ -716,6 +716,7 @@ function fetchVideoList(episodeId) {
           console.log("[allanime] URL desencriptada[" + idx + "]: " + videoUrl.substring(0, 80));
         } else {
           videoUrl = absoluteStreamUrl(videoUrl);
+          console.log("[allanime] URL directa[" + idx + "]: " + videoUrl.substring(0, 80));
         }
         
         // Obtener nombre del servidor usando detección por sourceName y URL
@@ -732,23 +733,52 @@ function fetchVideoList(episodeId) {
           return;
         }
         
-        // Clasificar por tipo y URL
-        if (videoType === "player") {
-          // Player directo de AllAnime
+        // Resolver URLs de clock de AllAnime (S-mp4, Luf-Mp4, etc.)
+        // El endpoint correcto es /apivtwo/clock.json (no /apivtwo/clock, que devuelve HTML)
+        if (videoUrl.indexOf("allanime.day/apivtwo/clock") !== -1) {
+          // Convertir /clock? a /clock.json?
+          var clockUrl = videoUrl.replace("/apivtwo/clock?", "/apivtwo/clock.json?");
+          try {
+            var clockResp = http.get(clockUrl, {
+              "Referer": SOURCE.baseUrl + "/",
+              "Accept": "application/json"
+            });
+            var clockData = JSON.parse(clockResp);
+            if (clockData.links && clockData.links.length > 0) {
+              clockData.links.forEach(function(lnk, lIdx) {
+                var link = lnk.link || lnk.mp4 || "";
+                if (!link) return;
+                var label = serverName;
+                if (lnk.resolutionStr) label += " " + lnk.resolutionStr;
+                else label += " — HD";
+                console.log("[allanime] Clock[" + idx + "." + lIdx + "]: " + link.substring(0, 80));
+                results.push({
+                  url: link,
+                  server: serverName,
+                  quality: label,
+                  subtitles: lnk.subtitles || []
+                });
+              });
+            } else {
+              console.log("[allanime] Clock sin links[" + idx + "]: " + clockResp.substring(0, 120));
+            }
+          } catch(clockErr) {
+            console.log("[allanime] Error resolviendo clock[" + idx + "]: " + clockErr);
+          }
+          return;
+        }
+
+        // Detectar URLs directas de video (m3u8 / mp4)
+        var lowerUrl = videoUrl.toLowerCase();
+        var isDirect = lowerUrl.indexOf(".m3u8") !== -1 || lowerUrl.indexOf(".mp4") !== -1;
+
+        if (isDirect) {
           results.push({
-            embed: videoUrl,
-            server: serverName,
-            quality: serverName + " — HD"
-          });
-        } else if (videoType === "iframe") {
-          // iframe embed de terceros
-          results.push({
-            embed: videoUrl,
+            url: videoUrl,
             server: serverName,
             quality: serverName + " — HD"
           });
         } else {
-          // Otro tipo
           results.push({
             embed: videoUrl,
             server: serverName,
