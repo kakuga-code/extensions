@@ -6,7 +6,7 @@ const SOURCE = {
   name: "Anime-Sama",
   baseUrl: "https://anime-sama.to",
   language: "fr",
-  version: "1.0.0",
+  version: "1.0.1",
   iconUrl: "https://anime-sama.to/img/icon.png",
   contentKind: "anime",
   extractorRepositoryUrl: "https://raw.githubusercontent.com/kakuga-code/extensions/refs/heads/main/repo-extractores.json",
@@ -58,6 +58,40 @@ const DEFAULT_HEADERS = {
 
 const FILTERED_PAGE_SIZE = 24;
 
+const SERVER_NAME_MAP = {
+  "ok": "okru",
+  "okru": "okru",
+  "dood": "doodstream",
+  "doodstream": "doodstream",
+  "stape": "streamtape",
+  "streamtape": "streamtape",
+  "streamwish": "streamwish",
+  "sw": "streamwish",
+  "mx": "mixdrop",
+  "md": "mixdrop",
+  "mixdrop": "mixdrop",
+  "mp4": "mp4upload",
+  "mp4u": "mp4upload",
+  "mp4upload": "mp4upload",
+  "uq": "uqload",
+  "uqload": "uqload",
+  "yt": "yourupload",
+  "yu": "yourupload",
+  "yourupload": "yourupload",
+  "voe": "voe",
+  "vidsrc": "vidsrc",
+  "dingtezuni": "vidhide",
+  "minochinos": "vidhide",
+  "vidhide": "vidhide",
+  "vidhidevip": "vidhide",
+  "vidhideplus": "vidhide",
+  "vidnest": "vidnest",
+  "megacloud": "megacloud",
+  "sendvid": "sendvid",
+  "sibnet": "sibnet",
+  "vidmoly": "vidmoly"
+};
+
 // ── Helpers ──────────────────────────────────────────────
 
 function httpGet(url) {
@@ -81,21 +115,38 @@ function decodeHtml(str) {
 }
 
 function serverNameFromUrl(url) {
-  if (!url) return "Unknown";
+  if (!url) return "unknown";
   const m = url.match(/^https?:\/\/(?:www\.)?([^/]+)/i);
-  if (!m) return "Unknown";
+  if (!m) return "unknown";
   const host = m[1].toLowerCase();
-  if (host.indexOf("vidmoly") !== -1) return "Vidmoly";
-  if (host.indexOf("sibnet") !== -1) return "Sibnet";
-  if (host.indexOf("sendvid") !== -1) return "Sendvid";
-  if (host.indexOf("oneupload") !== -1) return "Oneupload";
-  if (host.indexOf("smoothpre") !== -1) return "Smoothpre";
-  if (host.indexOf("ok.ru") !== -1) return "Okru";
-  if (host.indexOf("voe") !== -1) return "Voe";
-  if (host.indexOf("dood") !== -1) return "DoodStream";
-  if (host.indexOf("streamtape") !== -1) return "StreamTape";
-  if (host.indexOf("streamwish") !== -1) return "StreamWish";
-  return m[1].split(".")[0];
+
+  if (host.indexOf("vidmoly") !== -1) return "vidmoly";
+  if (host.indexOf("sibnet") !== -1) return "sibnet";
+  if (host.indexOf("sendvid") !== -1) return "sendvid";
+  if (host.indexOf("oneupload") !== -1) return "oneupload";
+  if (host.indexOf("smoothpre") !== -1) return "smoothpre";
+  if (host.indexOf("ok.ru") !== -1) return "okru";
+  if (host.indexOf("voe") !== -1) return "voe";
+  if (host.indexOf("dood") !== -1) return "doodstream";
+  if (host.indexOf("streamtape") !== -1) return "streamtape";
+  if (host.indexOf("streamwish") !== -1) return "streamwish";
+  if (host.indexOf("mixdrop") !== -1) return "mixdrop";
+  if (host.indexOf("mp4upload") !== -1) return "mp4upload";
+  if (host.indexOf("uqload") !== -1) return "uqload";
+  if (host.indexOf("yourupload") !== -1) return "yourupload";
+  if (host.indexOf("dingtezuni") !== -1) return "vidhide";
+  if (host.indexOf("minochinos") !== -1) return "vidhide";
+  if (host.indexOf("vidhide") !== -1) return "vidhide";
+  if (host.indexOf("vidnest") !== -1) return "vidnest";
+  if (host.indexOf("vidsrc") !== -1) return "vidsrc";
+  if (host.indexOf("megacloud") !== -1) return "megacloud";
+
+  return m[1].split(".")[0].toLowerCase();
+}
+
+function canonicalServerName(raw) {
+  const key = (raw || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  return SERVER_NAME_MAP[key] || key;
 }
 
 // ── Catalog ───────────────────────────────────────────────
@@ -406,31 +457,22 @@ function fetchVideoList(episodeIdStr) {
     const embedUrl = urls[epIndex];
     if (!embedUrl || embedUrl.length < 5) continue;
 
-    const serverName = serverNameFromUrl(embedUrl);
+    const serverName = canonicalServerName(serverNameFromUrl(embedUrl));
     const mirrorNum = arrayName.replace("eps", "");
 
-    const u = embedUrl.toLowerCase();
-    const hasNativeExtractor = u.indexOf("dingtezuni.com") !== -1
-      || u.indexOf("minochinos.com") !== -1
-      || u.indexOf("vidhide") !== -1
-      || u.indexOf("sendvid.com") !== -1
-      || u.indexOf("sibnet.ru") !== -1
-      || u.indexOf("ok.ru") !== -1
-      || u.indexOf("voe.sx") !== -1
-      || u.indexOf("dood") !== -1
-      || u.indexOf("streamtape.com") !== -1
-      || u.indexOf("streamwish") !== -1
-      || u.indexOf("mp4upload.com") !== -1
-      || u.indexOf("mixdrop") !== -1
-      || u.indexOf("uqload") !== -1
-      || u.indexOf("yourupload.com") !== -1;
-    const needsBrowser = !hasNativeExtractor;
+    // Estos servidores suelen necesitar navegador si no hay extractor remoto.
+    // Marcamos browserSession: true como fallback para los que NO están en el repo.
+    const hasRemoteExtractor = [
+      "doodstream", "sendvid", "okru", "voe", "streamtape", "streamwish",
+      "mixdrop", "mp4upload", "uqload", "yourupload", "vidhide", "vidnest",
+      "vidsrc", "megacloud"
+    ].indexOf(serverName) !== -1;
 
     results.push({
       server: serverName,
-      quality: serverName + " — M" + mirrorNum,
+      quality: serverName.charAt(0).toUpperCase() + serverName.slice(1) + " — M" + mirrorNum,
       embed: embedUrl,
-      browserSession: needsBrowser
+      browserSession: !hasRemoteExtractor
     });
   }
 
