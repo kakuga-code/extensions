@@ -12,6 +12,7 @@ const EXTRACTOR = {
     "minochinos.com",
     "vidhide.com",
     "vidhide.to",
+    "vidhidepro.com",
     "vidhidevip.com",
     "vidhideplus.com"
   ]
