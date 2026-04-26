@@ -1,11 +1,11 @@
 // MixDrop Extractor — Kazemi JS
 // =========================================================
 
-const EXTRACTOR = {
+var EXTRACTOR = {
   id: "mixdrop",
   aliases: ["mx", "md", "mixdrop"],
   name: "MixDrop",
-  version: "1.0.0",
+  version: "1.0.1",
   domains: [
     "mixdrop.co",
     "mixdrop.to",
@@ -17,15 +17,19 @@ const EXTRACTOR = {
     "mixdrop.gl",
     "mixdrop.vc",
     "mixdrop24.com",
-    "mixdrop.top",        // Dominio visto en logs
-    "mixdrop.ag",         // Ya incluido
-    "mixdrop.vc",         // Ya incluido
-    "mixdrop.ch",         // Ya incluido
-    "mixdrop.bz",          // Ya incluido
+    "mixdrop.top",
     "mdy48tn97.com",
     "mdbekjwqa.pw",
     "mxdrop.to"
   ]
+};
+
+var SOURCE = {
+  id: EXTRACTOR.id,
+  name: EXTRACTOR.name,
+  baseUrl: "https://mixdrop.co",
+  language: "all",
+  version: EXTRACTOR.version
 };
 
 // ── Helpers ──────────────────────────────────────────────

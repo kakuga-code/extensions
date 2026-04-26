@@ -204,19 +204,53 @@ function buildGraphQLRequest(query, variables) {
 function parseGraphQLResponse(respStr) {
   var data = JSON.parse(respStr);
 
-  // AllAnime cifra algunas respuestas de GraphQL en data.tobeparsed. El
-  // frontend oficial lo abre con AES-GCM usando esta clave fija invertida.
+  // AllAnime cifra algunas respuestas de GraphQL en data.tobeparsed. Primero
+  // probamos el layout AES-GCM actual de AllAnime y dejamos CTR como fallback.
   if (data && data.data && data.data.tobeparsed) {
     try {
-      var key = "P7K2RGbFgauVtmiS".split("").reverse().join("");
-      var decrypted = (typeof crypto !== "undefined" && crypto.aesGcmDecryptBase64)
-        ? crypto.aesGcmDecryptBase64(data.data.tobeparsed, key)
-        : "";
+      var key = "SimtVuagFbGR2K7P";
+      var keysToTry = [key, key.split("").reverse().join("")];
+      var decrypted = "";
+
+      if (typeof crypto !== "undefined") {
+        if (crypto.allanimeDecryptBase64) {
+          try {
+            decrypted = crypto.allanimeDecryptBase64(data.data.tobeparsed) || "";
+          } catch (_) {}
+        }
+
+        for (var ki = 0; ki < keysToTry.length && !decrypted; ki++) {
+          var k = keysToTry[ki];
+
+          if (crypto.aesCtrDecryptBase64) {
+            try {
+              var ctrCandidate = crypto.aesCtrDecryptBase64(data.data.tobeparsed, k) || "";
+              if (ctrCandidate && ctrCandidate.charAt(0) === "{") {
+                decrypted = ctrCandidate;
+              }
+            } catch (_) {}
+          }
+        }
+      }
+
       if (decrypted) {
-        data.data = JSON.parse(decrypted);
-        console.log("[allanime] Respuesta cifrada descifrada: " + Object.keys(data.data).join(", "));
-      } else {
-        console.log("[allanime] No se pudo descifrar tobeparsed");
+        var decryptedData = JSON.parse(decrypted);
+
+        // Algunas respuestas devuelven el payload dentro de data o directamente
+        // como un objeto con episode/sourceUrls.
+        if (decryptedData && decryptedData.data && typeof decryptedData.data === "object") {
+          decryptedData = decryptedData.data;
+        }
+
+        if (decryptedData && typeof decryptedData === "object") {
+          Object.assign(data.data, decryptedData);
+          delete data.data.tobeparsed;
+          console.log("[allanime] Respuesta cifrada descifrada: " + Object.keys(data.data).join(", "));
+        }
+      }
+
+      if (!data.data.episode) {
+        console.log("[allanime] tobeparsed no descifrado; usando fallback si está disponible");
       }
     } catch(e) {
       console.log("[allanime] Error descifrando tobeparsed: " + e);
@@ -790,6 +824,58 @@ function fetchVideoList(episodeId) {
       console.log("[allanime] No se encontró episode en la respuesta");
       if (data.data) {
         console.log("[allanime] Response data keys: " + Object.keys(data.data).join(", "));
+      }
+
+      // Fallback: algunos episodios no exponen episode/sourceUrls por la ruta
+      // principal y sí entregan información de video vía episodeInfos.
+      try {
+        var epNum = parseFloat(episodeString);
+        if (!isNaN(epNum)) {
+          var epInfoPayload = JSON.stringify({
+            query: "query($showId:String!,$episodeNumStart:Float!,$episodeNumEnd:Float!){ episodeInfos(showId:$showId,episodeNumStart:$episodeNumStart,episodeNumEnd:$episodeNumEnd){ episodeIdNum vidInforssub vidInforsdub vidInforsraw } }",
+            variables: {
+              showId: showId,
+              episodeNumStart: epNum,
+              episodeNumEnd: epNum
+            }
+          });
+
+          var epInfoResp = http.post(SOURCE.apiUrl, epInfoPayload, {
+            "Content-Type": "application/json",
+            "Accept": "*/*",
+            "Origin": SOURCE.baseUrl,
+            "Referer": SOURCE.baseUrl + "/"
+          });
+
+          var epInfoData = parseGraphQLResponse(epInfoResp);
+          var infos = (epInfoData && epInfoData.data && epInfoData.data.episodeInfos) ? epInfoData.data.episodeInfos : [];
+
+          if (Array.isArray(infos) && infos.length > 0) {
+            var info = infos[0];
+            var vidInfo = null;
+            if (translationType === "dub") vidInfo = info.vidInforsdub;
+            else if (translationType === "raw") vidInfo = info.vidInforsraw;
+            else vidInfo = info.vidInforssub || info.vidInforsdub || info.vidInforsraw;
+
+            if (vidInfo && vidInfo.vidPath) {
+              var directCandidate = "https://allanime.day/apivtwo/vidcdn.json?path=" + encodeURIComponent(vidInfo.vidPath);
+              results.push({
+                embed: directCandidate,
+                server: "AllAnime",
+                quality: "AllAnime — Fallback",
+                browserSession: true,
+                headers: {
+                  "Accept": "*/*",
+                  "Origin": SOURCE.baseUrl,
+                  "Referer": SOURCE.baseUrl + "/"
+                }
+              });
+              console.log("[allanime] Fallback episodeInfos vidPath detectado");
+            }
+          }
+        }
+      } catch (fallbackErr) {
+        console.log("[allanime] Error en fallback episodeInfos: " + fallbackErr);
       }
     }
   } catch(e) {

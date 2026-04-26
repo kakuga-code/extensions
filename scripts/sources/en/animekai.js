@@ -104,6 +104,38 @@ var PAGE_HEADERS = {
 
 var STREAM_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
 
+function parseJsonLoose(text) {
+  if (!text) return null;
+  var s = ("" + text).trim();
+  if (!s) return null;
+
+  try {
+    return JSON.parse(s);
+  } catch (_) {}
+
+  // Algunos endpoints devuelven basura antes/despues del JSON.
+  var start = s.indexOf("{");
+  var end = s.lastIndexOf("}");
+  if (start !== -1 && end > start) {
+    try {
+      return JSON.parse(s.substring(start, end + 1));
+    } catch (_) {}
+  }
+
+  // Fallback minimo para respuestas truncadas que aun conservan el campo result.
+  var resultM = s.match(/"result"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
+  if (resultM) {
+    return { result: resultM[1].replace(/\\\//g, "/") };
+  }
+
+  return null;
+}
+
+function resolveOrigin(url) {
+  var m = (url || "").match(/^(https?:\/\/[^\/]+)/i);
+  return m ? m[1] : "";
+}
+
 // ── enc-dec.app helpers ───────────────────────────────────
 
 function encodeToken(text) {
@@ -136,22 +168,101 @@ function decodeKai(text) {
   }
 }
 
-// Obtiene el m3u8 final desde un embed URL de megaup.nl
-// Flujo: /e/ID → /media/ID (JSON encriptado) → dec-mega → sources[0].file (m3u8)
+// Obtiene el m3u8 final desde un embed URL de megaup.nl o anikai.to/iframe/
+// Flujo: /e/ID o /iframe/ID → /media/ID (JSON encriptado) → dec-mega/dec-kai → sources[0].file (m3u8)
 function getMegaupStream(embedUrl) {
-  var mediaUrl = embedUrl.replace("/e/", "/media/");
-  var mediaResp = http.get(mediaUrl, {
-    "Referer": "https://anikai.to/",
+  var isAnikai = embedUrl.indexOf("anikai.to/iframe/") !== -1;
+  var mediaUrl;
+  if (isAnikai) {
+    // Si es un iframe de Anikai, el token es el ID de Megaup
+    var token = embedUrl.replace(/^.*\/iframe\//, "").split("?")[0];
+    mediaUrl = "https://megaup.nl/media/" + token;
+  } else {
+    mediaUrl = embedUrl.replace("/e/", "/media/");
+  }
+  var origin = resolveOrigin(embedUrl);
+  var mediaHeaders = {
+    "Referer": embedUrl,
+    "Origin": origin,
+    "Accept": "application/json, text/plain, */*",
+    "X-Requested-With": "XMLHttpRequest",
     "User-Agent": STREAM_UA
-  });
-  var encrypted = "";
-  try {
-    var mj = JSON.parse(mediaResp);
-    encrypted = (mj && mj.result) ? mj.result : "";
-  } catch (e) {
-    console.log("[animekai] getMegaupStream parse error: " + e);
+  };
+
+  if (isAnikai) {
+    // The iframe URL token may itself be a dec-kai encoded megaup URL.
+    // Extract path token: https://anikai.to/iframe/TOKEN → TOKEN
+    var iframeToken = embedUrl.replace(/^.*\/iframe\//, "");
+    console.log("[animekai] iframe token=" + iframeToken.substring(0, 40));
+
+    var decResp2 = http.post(
+      "https://enc-dec.app/api/dec-kai",
+      JSON.stringify({ text: iframeToken }),
+      { "Content-Type": "application/json" }
+    );
+    console.log("[animekai] dec-kai iframe resp=" + (decResp2 ? decResp2.substring(0, 120) : "null"));
+    var dj2 = parseJsonLoose(decResp2);
+    if (dj2 && dj2.status === 200) {
+      var innerUrl = typeof dj2.result === "string" ? dj2.result : (dj2.result && dj2.result.url);
+      if (innerUrl && typeof innerUrl === "string" && innerUrl.indexOf("http") === 0) {
+        console.log("[animekai] iframe decoded innerUrl=" + innerUrl.substring(0, 80));
+        // Recurse — now treat as megaup or another known host
+        return getMegaupStream(innerUrl);
+      }
+      // result may be a JSON object with sources directly
+      if (dj2.result && dj2.result.sources) {
+        var s = dj2.result.sources;
+        if (s[0] && s[0].file) return s[0].file;
+      }
+    }
+
+    // Fallback: try fetching iframe with full browser-like headers
+    console.log("[animekai] fetching iframe html=" + embedUrl);
+    var iframeHtml = http.get(embedUrl, {
+      "Referer": "https://anikai.to/",
+      "Origin": "https://anikai.to",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "User-Agent": STREAM_UA
+    });
+    console.log("[animekai] iframeHtml len=" + (iframeHtml ? iframeHtml.length : 0) + " preview=" + (iframeHtml ? iframeHtml.substring(0, 200) : ""));
+
+    if (iframeHtml && iframeHtml.length > 10) {
+      var m3u8M = iframeHtml.match(/(https?:\/\/[^\s"']+\.m3u8[^\s"']*)/);
+      if (m3u8M) return m3u8M[1];
+      var srcJsonM = iframeHtml.match(/sources\s*[=:]\s*(\[[\s\S]*?\])/);
+      if (srcJsonM) {
+        try {
+          var srcArr = JSON.parse(srcJsonM[1]);
+          if (srcArr && srcArr[0] && srcArr[0].file) return srcArr[0].file;
+        } catch (_) {}
+      }
+    }
+
+    console.log("[animekai] iframe: no stream found");
     return null;
   }
+
+  console.log("[animekai] mediaUrl=" + mediaUrl);
+  var mediaResp = http.get(mediaUrl, mediaHeaders);
+  console.log("[animekai] mediaResp len=" + (mediaResp ? mediaResp.length : 0) + " preview=" + (mediaResp ? mediaResp.substring(0, 80) : ""));
+
+  // Reintento con referer de origen
+  if (!mediaResp || mediaResp.length < 8) {
+    mediaResp = http.get(mediaUrl, {
+      "Referer": origin ? (origin + "/") : "https://megaup.nl/",
+      "Origin": origin || "https://megaup.nl",
+      "Accept": "application/json, text/plain, */*",
+      "User-Agent": STREAM_UA
+    });
+  }
+
+  var encrypted = "";
+  var mj = parseJsonLoose(mediaResp);
+  if (!mj) {
+    console.log("[animekai] getMegaupStream parse error: invalid media JSON len=" + (mediaResp ? mediaResp.length : 0));
+    return null;
+  }
+  encrypted = (mj && typeof mj.result === "string") ? mj.result : "";
   if (!encrypted) return null;
 
   var decResp = http.post(
@@ -159,14 +270,19 @@ function getMegaupStream(embedUrl) {
     JSON.stringify({ text: encrypted, agent: STREAM_UA }),
     { "Content-Type": "application/json" }
   );
-  try {
-    var dj = JSON.parse(decResp);
-    var sources = dj && dj.result && dj.result.sources;
-    return (sources && sources[0] && sources[0].file) ? sources[0].file : null;
-  } catch (e) {
-    console.log("[animekai] dec-mega parse error: " + e);
+  var dj = parseJsonLoose(decResp);
+  if (!dj) {
+    console.log("[animekai] dec-mega parse error: invalid JSON");
     return null;
   }
+
+  var result = dj.result;
+  if (typeof result === "string") {
+    result = parseJsonLoose(result) || result;
+  }
+
+  var sources = result && result.sources;
+  return (sources && sources[0] && sources[0].file) ? sources[0].file : null;
 }
 
 // ── JSON unwrapping helpers ───────────────────────────────
@@ -494,13 +610,20 @@ function fetchVideoList(episodeId) {
   while ((gm = groupRe.exec(serversHtml)) !== null) {
     var lang = langMap[gm[1]] || gm[1];
     var groupHtml = gm[2];
-    var srvRe = /<span[^>]+\bdata-sid="([^"]*)"[^>]+\bdata-lid="([^"]+)"[^>]*>([^<]+)<\/span>/g;
+    var srvRe = /<span[^>]+>([\s\S]*?)<\/span>/g;
     var sm;
     while ((sm = srvRe.exec(groupHtml)) !== null) {
+      var spanTag = sm[0];
+      var sidM  = spanTag.match(/\bdata-sid="([^"]*)"/);
+      var lidM  = spanTag.match(/\bdata-lid="([^"]+)"/);
+      var eidM  = spanTag.match(/\bdata-eid="([^"]+)"/);
+      if (!sidM || !lidM) continue;
+      var nameM2 = sm[1].trim();
       entries.push({
-        sid:  sm[1],
-        lid:  sm[2],
-        name: sm[3].trim(),
+        sid:  sidM[1],
+        lid:  lidM[1],
+        eid:  eidM ? eidM[1] : "",
+        name: nameM2,
         lang: lang
       });
     }
@@ -516,36 +639,66 @@ function fetchVideoList(episodeId) {
     var encLid = encodeToken(e.lid);
     if (!encLid) continue;
 
-    var viewResp = http.get(
-      SOURCE.baseUrl + "/ajax/links/view?id=" + encodeURIComponent(e.lid) + "&_=" + encodeURIComponent(encLid),
-      AJAX_HEADERS
-    );
+    console.log("[animekai] entry sid=" + e.sid + " lid=" + e.lid.substring(0,12) + " eid=" + e.eid.substring(0,12) + " lang=" + e.lang);
 
-    // viewResp = {"status":"ok","result":"<encrypted_blob>"}
-    var encrypted = "";
-    try {
-      var vj = JSON.parse(viewResp);
-      encrypted = (vj && typeof vj.result === "string") ? vj.result : "";
-    } catch (err) { continue; }
+    // Try AniWatch-style v2 sources endpoint first (no iframe needed)
+    var embedUrl = "";
+    if (e.eid) {
+      var encEid = encodeToken(e.eid);
+      if (encEid) {
+        var srcResp = http.get(
+          SOURCE.baseUrl + "/ajax/v2/episode/sources?id=" + encodeURIComponent(e.eid) + "&_=" + encodeURIComponent(encEid),
+          AJAX_HEADERS
+        );
+        console.log("[animekai] v2sources resp=" + (srcResp ? srcResp.substring(0, 120) : "null"));
+        var srcJ = parseJsonLoose(srcResp);
+        if (srcJ && srcJ.link) {
+          embedUrl = srcJ.link;
+          console.log("[animekai] v2sources link=" + embedUrl.substring(0, 80));
+        }
+      }
+    }
 
-    if (!encrypted) continue;
+    // Fallback: use standard links/view → dec-kai flow
+    if (!embedUrl) {
+      var viewResp = http.get(
+        SOURCE.baseUrl + "/ajax/links/view?id=" + encodeURIComponent(e.lid) + "&_=" + encodeURIComponent(encLid),
+        AJAX_HEADERS
+      );
 
-    // Decode kai → {url: "https://megaup.nl/e/...", skip:{...}}
-    var decoded = decodeKai(encrypted);
-    if (!decoded) continue;
+      var encrypted = "";
+      try {
+        var vj = JSON.parse(viewResp);
+        encrypted = (vj && typeof vj.result === "string") ? vj.result : "";
+      } catch (err) { continue; }
 
-    var embedUrl = typeof decoded === "string" ? decoded : (decoded.url || "");
-    if (!embedUrl) continue;
+      if (!encrypted) continue;
 
-    // Resolver megaup → m3u8 final via /media/ + dec-mega
-    var m3u8 = getMegaupStream(embedUrl);
-    console.log("[animekai] m3u8 " + e.lang + ": " + (m3u8 ? m3u8.substring(0, 60) : "FAILED"));
-    if (!m3u8) continue;
+      var decoded = decodeKai(encrypted);
+      console.log("[animekai] decodeKai " + e.lang + " sid=" + e.sid + ": " + (decoded ? JSON.stringify(decoded) : "null"));
+      if (!decoded) continue;
 
+      embedUrl = typeof decoded === "string" ? decoded : (decoded.url || "");
+      if (!embedUrl) continue;
+    }
+
+    console.log("[animekai] embedUrl " + e.lang + ": " + embedUrl.substring(0, 100));
+
+    // Delegate all embed URLs to the appropriate extractor
+    if (embedUrl.indexOf("megaup.") !== -1 || embedUrl.indexOf("anikai.to/iframe/") !== -1) {
+      results.push({
+        embed:   embedUrl,
+        server:  "megaup",
+        quality: e.lang + (e.name ? " — " + e.name : "")
+      });
+      continue;
+    }
+
+    // Unknown embed host — try as generic embed
     results.push({
-      url:     m3u8,
-      server:  "animekai-" + e.lang.toLowerCase(),
-      quality: e.lang + " — " + e.name
+      embed:   embedUrl,
+      server:  "megaup",
+      quality: e.lang + (e.name ? " — " + e.name : "")
     });
   }
 

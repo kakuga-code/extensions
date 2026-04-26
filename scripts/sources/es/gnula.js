@@ -32,7 +32,7 @@ const SOURCE = {
   ]
 };
 
-const DISABLED_SERVERS = ["filemoon","netu","doodstream","mega", "mega.nz", "mediafire", "zippyshare", "1fichier"];
+const DISABLED_SERVERS = ["filemoon","netu","mega", "mega.nz", "mediafire", "zippyshare", "1fichier"];
 
 // ── Helpers ──────────────────────────────────────────────
 
