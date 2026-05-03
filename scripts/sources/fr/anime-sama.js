@@ -1,13 +1,18 @@
 // anime-sama — Extensión Kazemi JS
 // =========================================================
 
+/** Repère officiel des domaines (lien « Accéder à Anime-Sama ») : https://anime-sama.pw */
+const ANIME_SAMA_MIRROR_INDEX = "https://anime-sama.pw/";
+/** Dernier domaine connu si la page miroir est injoignable (SSR fiable pour /catalogue/...) */
+const ANIME_SAMA_BASE_FALLBACK = "https://anime-sama.to";
+
 const SOURCE = {
   id: "anime-sama",
   name: "Anime-Sama",
-  baseUrl: "https://anime-sama.to",
+  baseUrl: ANIME_SAMA_BASE_FALLBACK,
   language: "fr",
-  version: "1.0.1",
-  iconUrl: "https://anime-sama.to/img/icon.png",
+  version: "1.0.2",
+  iconUrl: ANIME_SAMA_BASE_FALLBACK + "/img/icon.png",
   contentKind: "anime",
   extractorRepositoryUrl: "https://raw.githubusercontent.com/kakuga-code/extensions/refs/heads/main/repo-extractores.json",
   supportedTypes: ["Anime", "Film", "Autres"],
@@ -50,6 +55,66 @@ const SOURCE = {
     }
   ]
 };
+
+function httpGetRaw(url, headers) {
+  try {
+    return http.get(url, headers || {
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Referer": "https://anime-sama.pw/"
+    });
+  } catch (e) {
+    console.log("[anime-sama] GET raw error " + url + ": " + e);
+    return null;
+  }
+}
+
+/**
+ * Lit anime-sama.pw et met à jour SOURCE.baseUrl + SOURCE.iconUrl (objet mutable).
+ */
+function initAnimeSamaBaseUrlFromMirror() {
+  var html = httpGetRaw(ANIME_SAMA_MIRROR_INDEX);
+  if (!html || html.length < 200) {
+    console.log("[anime-sama] Miroir indisponible, fallback baseUrl=" + SOURCE.baseUrl);
+    return;
+  }
+  var m =
+    html.match(/<a[^>]+class="[^"]*btn-primary[^"]*"[^>]+href="(https?:\/\/[^"]+)"/i) ||
+    html.match(/href="(https?:\/\/anime-sama[^"]+)"[^>]*class="[^"]*btn-primary[^"]*"/i);
+  if (!m || !m[1]) {
+    console.log("[anime-sama] Lien officiel introuvable sur le miroir, fallback baseUrl=" + SOURCE.baseUrl);
+    return;
+  }
+  var base = m[1].replace(/\/+$/, "");
+  if (base.toLowerCase().indexOf("anime-sama") === -1) {
+    console.log("[anime-sama] URL miroir suspecte ignorée: " + base);
+    return;
+  }
+  SOURCE.baseUrl = base;
+  SOURCE.iconUrl = base + "/img/icon.png";
+  console.log("[anime-sama] Domaine résolu: " + SOURCE.baseUrl);
+}
+
+initAnimeSamaBaseUrlFromMirror();
+
+/**
+ * Certains domaines du miroir (ex. .si, .tv, .org) redirigent vers la racine .to
+ * en perdant le chemin /catalogue/... — les fiches ne chargent plus.
+ * L'origine SSR observée pour le catalogue + détail est anime-sama.to.
+ */
+function ensureAnimeSamaCatalogOrigin() {
+  try {
+    var m = SOURCE.baseUrl.match(/^https?:\/\/(?:www\.)?([^/]+)/i);
+    var host = m ? m[1].toLowerCase() : "";
+    if (host === "anime-sama.si" || host === "anime-sama.tv" || host === "anime-sama.org") {
+      SOURCE.baseUrl = "https://anime-sama.to";
+      SOURCE.iconUrl = SOURCE.baseUrl + "/img/icon.png";
+      console.log("[anime-sama] baseUrl normalisé (SSR): " + SOURCE.baseUrl);
+    }
+  } catch (e) {}
+}
+
+ensureAnimeSamaCatalogOrigin();
 
 const DEFAULT_HEADERS = {
   "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -103,6 +168,11 @@ function httpGet(url) {
   }
 }
 
+function stripTagsSimple(s) {
+  if (!s) return "";
+  return decodeHtml(String(s).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+}
+
 function decodeHtml(str) {
   if (!str) return str;
   return str
@@ -147,6 +217,12 @@ function serverNameFromUrl(url) {
 function canonicalServerName(raw) {
   const key = (raw || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   return SERVER_NAME_MAP[key] || key;
+}
+
+function catalogueHostPattern() {
+  var m = SOURCE.baseUrl.match(/^https?:\/\/(?:www\.)?([^/]+)/i);
+  var host = m ? m[1] : "anime-sama.to";
+  return host.replace(/\./g, "\\.");
 }
 
 // ── Catalog ───────────────────────────────────────────────
@@ -270,7 +346,10 @@ function parseCatalogueCards(html, filters) {
   for (var ci = 0; ci < chunks.length; ci++) {
     const block = chunks[ci];
 
-    const slugM = block.match(/href="https?:\/\/anime-sama\.to\/catalogue\/([^/"]+)/i);
+    // Anime-Sama actual usa mayormente rutas relativas (/catalogue/slug),
+    // pero mantenemos compatibilidad con URLs absolutas.
+    var slugRe = /href="(?:https?:\/\/[^"]+)?\/catalogue\/([^/"?#]+)/i;
+    const slugM = block.match(slugRe);
     if (!slugM) continue;
     const slug = slugM[1];
     if (seen[slug]) continue;
@@ -339,17 +418,35 @@ function fetchItemDetails(slug) {
 
   // Synopsis from meta description
   const synM = html.match(/<meta name="description"[^>]+content="([^"]+)"/i);
-  const synopsis = synM ? synM[1].trim() : "";
+  var synopsis = synM ? synM[1].trim() : "";
+  if (!synopsis) {
+    const bodySyn = html.match(
+      />Synopsis<\/h2>[\s\S]*?<p[^>]+class="[^"]*text-gray-300[^"]*[^"]*"[^>]*>([\s\S]*?)<\/p>/i
+    );
+    synopsis = bodySyn ? stripTagsSimple(bodySyn[1]) : "";
+  }
 
   // Cover from og:image
-  const coverM = html.match(/<meta property="og:image"[^>]+content="([^"]+)"/i);
-  const cover = coverM ? coverM[1].trim() : null;
+  const coverM =
+    html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) ||
+    html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
+  var cover = coverM ? coverM[1].trim() : null;
+  if (!cover) {
+    const covImg = html.match(/id="coverOeuvre"[^>]+src="([^"]+)"/i);
+    if (covImg) cover = covImg[1].trim();
+  }
 
   // Genres — single <a> after "Genres" header containing comma-separated list
-  const genreM = html.match(/Genres[\s\S]*?<a[^>]*>([^<]+)<\/a>/i);
-  const genres = genreM
-    ? genreM[1].split(",").map(function (g) { return g.trim(); }).filter(Boolean)
-    : [];
+  var genres = [];
+  const genreM = html.match(/>Genres<\/h2>[\s\S]*?<a[^>]*>([^<]+)<\/a>/i);
+  if (genreM) {
+    genres = genreM[1].split(/[-–,]/).map(function (g) { return g.trim(); }).filter(Boolean);
+  } else {
+    const genreLegacy = html.match(/Genres[\s\S]*?<a[^>]*>([^<]+)<\/a>/i);
+    if (genreLegacy) {
+      genres = genreLegacy[1].split(",").map(function (g) { return g.trim(); }).filter(Boolean);
+    }
+  }
 
   return {
     title: title,
