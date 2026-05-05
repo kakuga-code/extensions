@@ -7,7 +7,7 @@ const SOURCE = {
   name: "AnimeKai",
   baseUrl: "https://anikai.to",
   language: "en",
-  version: "1.0.2",
+  version: "1.0.3",
   iconUrl: "https://anikai.to/favicon.ico",
   contentKind: "anime",
   extractorRepositoryUrl: "https://raw.githubusercontent.com/kakuga-code/extensions/refs/heads/main/repo-extractores.json",
@@ -103,6 +103,8 @@ var PAGE_HEADERS = {
 };
 
 var STREAM_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
+var BROWSE_CACHE = {};
+var BROWSE_CACHE_TTL_MS = 20000; // 20s evita dobles cargas inmediatas en Home
 
 function parseJsonLoose(text) {
   if (!text) return null;
@@ -136,36 +138,114 @@ function resolveOrigin(url) {
   return m ? m[1] : "";
 }
 
+function nowMs() {
+  return Date.now ? Date.now() : new Date().getTime();
+}
+
+function getCachedHtml(cacheKey, ttlMs) {
+  var row = BROWSE_CACHE[cacheKey];
+  if (!row) return null;
+  if (nowMs() - row.ts > ttlMs) {
+    delete BROWSE_CACHE[cacheKey];
+    return null;
+  }
+  return row.html || "";
+}
+
+function setCachedHtml(cacheKey, html) {
+  BROWSE_CACHE[cacheKey] = { ts: nowMs(), html: html || "" };
+}
+
+function httpGetWithRetry(url, headers) {
+  var resp = http.get(url, headers || {});
+  if (resp && resp.length > 0) return resp;
+  // Retry liviano para reducir fallos intermitentes del sitio/CDN.
+  var retryHeaders = {};
+  for (var k in (headers || {})) retryHeaders[k] = headers[k];
+  retryHeaders["Cache-Control"] = "no-cache";
+  return http.get(url, retryHeaders);
+}
+
+function normalizeSubtitleTracks(value) {
+  var raw = [];
+  if (!value) return raw;
+  if (Array.isArray(value)) raw = value;
+  else if (Array.isArray(value.tracks)) raw = value.tracks;
+  else if (Array.isArray(value.subtitles)) raw = value.subtitles;
+  else if (Array.isArray(value.captions)) raw = value.captions;
+
+  var out = [];
+  var seen = {};
+  for (var i = 0; i < raw.length; i++) {
+    var t = raw[i] || {};
+    var kind = (t.kind || t.type || "").toString().toLowerCase();
+    if (kind && kind !== "captions" && kind !== "subtitles" && kind !== "subtitle" && kind !== "vtt") continue;
+
+    var url = t.url || t.file || t.src || t.link;
+    if (!url || typeof url !== "string") continue;
+    if (!/^https?:\/\//i.test(url)) continue;
+    if (seen[url]) continue;
+    seen[url] = true;
+
+    var label = (t.label || t.name || t.lang || t.language || "Subtitle").toString();
+    var language = (t.language || t.lang || t.srclang || label || "und").toString().toLowerCase();
+    out.push({
+      url: url,
+      language: language.substring(0, 12) || "und",
+      label: label,
+      isDefault: t.default === true || t.isDefault === true
+    });
+    if (out.length >= 20) break;
+  }
+  return out;
+}
+
 // ── enc-dec.app helpers ───────────────────────────────────
 
 function encodeToken(text) {
-  var resp = http.get(
-    "https://enc-dec.app/api/enc-kai?text=" + encodeURIComponent(text),
-    PAGE_HEADERS
-  );
-  try {
-    var j = JSON.parse(resp);
-    return (j && j.result) ? j.result : "";
-  } catch (e) {
-    console.log("[animekai] encodeToken error: " + e);
-    return "";
+  if (!text) return "";
+  var url = "https://enc-dec.app/api/enc-kai?text=" + encodeURIComponent(text);
+  var lastErr = "";
+  for (var attempt = 0; attempt < 3; attempt++) {
+    var resp = http.get(url, PAGE_HEADERS);
+    var s = resp ? ("" + resp).trim() : "";
+    if (s.length < 2) {
+      lastErr = "empty";
+      continue;
+    }
+    var j = parseJsonLoose(s);
+    if (j && j.result) return j.result;
+    lastErr = "no-result";
   }
+  console.log("[animekai] encodeToken failed after retries: " + lastErr);
+  return "";
 }
 
 function decodeKai(text) {
-  var resp = http.post(
-    "https://enc-dec.app/api/dec-kai",
-    JSON.stringify({ text: text }),
-    { "Content-Type": "application/json" }
-  );
-  try {
-    var j = JSON.parse(resp);
-    if (!j || j.status !== 200) return null;
+  if (!text) return null;
+  var body = JSON.stringify({ text: text });
+  var hdrs = { "Content-Type": "application/json" };
+  var lastErr = "";
+  for (var attempt = 0; attempt < 3; attempt++) {
+    var resp = http.post("https://enc-dec.app/api/dec-kai", body, hdrs);
+    var s = resp ? ("" + resp).trim() : "";
+    if (s.length < 2) {
+      lastErr = "empty";
+      continue;
+    }
+    var j = parseJsonLoose(s);
+    if (!j) {
+      lastErr = "parse";
+      continue;
+    }
+    if (j.status !== 200) {
+      console.log("[animekai] decodeKai API status=" + j.status);
+      return null;
+    }
     return j.result;
-  } catch (e) {
-    console.log("[animekai] decodeKai error: " + e);
-    return null;
   }
+  console.log("[animekai] decodeKai failed after retries: " + lastErr);
+  return null;
 }
 
 // Obtiene el m3u8 final desde un embed URL de megaup.nl o anikai.to/iframe/
@@ -405,7 +485,14 @@ function browseCatalog(sort, type, page) {
   var params = "sort=" + encodeURIComponent(sort) + "&page=" + page;
   if (type) params += "&type[]=" + encodeURIComponent(type);
   var url  = SOURCE.baseUrl + "/browser?" + params;
-  var html = http.get(url, PAGE_HEADERS);
+  var cacheKey = "browse:" + url;
+  var html = getCachedHtml(cacheKey, BROWSE_CACHE_TTL_MS);
+  if (html === null) {
+    html = httpGetWithRetry(url, PAGE_HEADERS);
+    setCachedHtml(cacheKey, html);
+  } else {
+    console.log("[animekai] browse cache hit url=" + url + " len=" + html.length);
+  }
   console.log("[animekai] browse url=" + url + " len=" + html.length);
   var items = parseBrowserItems(html);
   console.log("[animekai] browse items=" + items.length);
@@ -444,9 +531,23 @@ function fetchSearch(query, page, filters) {
     return browseCatalog("trending", null, page);
   }
 
+  // Fast path: si solo hay orden/tipo (sin query ni género), reutilizar browse directo.
+  if (!hasQuery && filters && !filters.genre) {
+    var fastSort = filters.order || "trending";
+    var fastType = filters.type || null;
+    return browseCatalog(fastSort, fastType, page);
+  }
+
   var params = buildBrowserParams(query, page, filters);
   var url    = SOURCE.baseUrl + "/browser?" + params;
-  var html   = http.get(url, PAGE_HEADERS);
+  var cacheKey = "search:" + url;
+  var html = getCachedHtml(cacheKey, BROWSE_CACHE_TTL_MS);
+  if (html === null) {
+    html = httpGetWithRetry(url, PAGE_HEADERS);
+    setCachedHtml(cacheKey, html);
+  } else {
+    console.log("[animekai] search cache hit url=" + url + " len=" + html.length);
+  }
   console.log("[animekai] search url=" + url + " len=" + html.length);
   var items = parseBrowserItems(html);
   console.log("[animekai] search items=" + items.length);
@@ -631,19 +732,61 @@ function fetchVideoList(episodeId) {
 
   console.log("[animekai] servidores encontrados=" + entries.length);
 
+  function originFromPageUrl(u) {
+    if (!u) return "";
+    var m = ("" + u).match(/^(https?:\/\/[^/]+)/i);
+    return m ? m[1] : "";
+  }
+
+  function megaupHeadersForEmbed(embedUrl) {
+    var o = originFromPageUrl(embedUrl);
+    var h = { Referer: embedUrl };
+    if (o) h.Origin = o;
+    return h;
+  }
+
   var results = [];
+  var seenEmbed = {};
   // Limit to stay within request budget
-  var limit = Math.min(entries.length, 4);
+  var limit = Math.min(entries.length, 6);
   for (var i = 0; i < limit; i++) {
     var e = entries[i];
     var encLid = encodeToken(e.lid);
     if (!encLid) continue;
 
-    console.log("[animekai] entry sid=" + e.sid + " lid=" + e.lid.substring(0,12) + " eid=" + e.eid.substring(0,12) + " lang=" + e.lang);
+    var eidShort = e.eid ? ("" + e.eid).substring(0, 12) : "";
+    console.log("[animekai] entry sid=" + e.sid + " lid=" + e.lid.substring(0,12) + " eid=" + eidShort + " lang=" + e.lang);
 
-    // Try AniWatch-style v2 sources endpoint first (no iframe needed)
+    // Preferir links/view + dec-kai: en anikai.to el endpoint v2/episode/sources suele
+    // devolver 404 o agotar tiempo (-1001) sin aportar nada si decodeKai ya resuelve el embed.
     var embedUrl = "";
-    if (e.eid) {
+    var subtitles = [];
+
+    var viewResp = http.get(
+      SOURCE.baseUrl + "/ajax/links/view?id=" + encodeURIComponent(e.lid) + "&_=" + encodeURIComponent(encLid),
+      AJAX_HEADERS
+    );
+    if (!viewResp || viewResp.indexOf("{") === -1) {
+      viewResp = http.get(
+        SOURCE.baseUrl + "/ajax/links/view?id=" + encodeURIComponent(e.lid) + "&_=" + encodeURIComponent(encLid),
+        AJAX_HEADERS
+      );
+    }
+
+    var vj = parseJsonLoose(viewResp);
+    var encrypted = (vj && typeof vj.result === "string") ? vj.result : "";
+
+    if (encrypted) {
+      var decoded = decodeKai(encrypted);
+      console.log("[animekai] decodeKai " + e.lang + " sid=" + e.sid + ": " + (decoded ? JSON.stringify(decoded) : "null"));
+      if (decoded) {
+        embedUrl = typeof decoded === "string" ? decoded : (decoded.url || "");
+        subtitles = normalizeSubtitleTracks(decoded);
+        if (subtitles.length > 0) console.log("[animekai] subtitles " + e.lang + " sid=" + e.sid + ": " + subtitles.length);
+      }
+    }
+
+    if (!embedUrl && e.eid) {
       var encEid = encodeToken(e.eid);
       if (encEid) {
         var srcResp = http.get(
@@ -654,53 +797,55 @@ function fetchVideoList(episodeId) {
         var srcJ = parseJsonLoose(srcResp);
         if (srcJ && srcJ.link) {
           embedUrl = srcJ.link;
+          subtitles = normalizeSubtitleTracks(srcJ);
           console.log("[animekai] v2sources link=" + embedUrl.substring(0, 80));
         }
       }
     }
 
-    // Fallback: use standard links/view → dec-kai flow
-    if (!embedUrl) {
-      var viewResp = http.get(
-        SOURCE.baseUrl + "/ajax/links/view?id=" + encodeURIComponent(e.lid) + "&_=" + encodeURIComponent(encLid),
-        AJAX_HEADERS
-      );
-
-      var encrypted = "";
-      try {
-        var vj = JSON.parse(viewResp);
-        encrypted = (vj && typeof vj.result === "string") ? vj.result : "";
-      } catch (err) { continue; }
-
-      if (!encrypted) continue;
-
-      var decoded = decodeKai(encrypted);
-      console.log("[animekai] decodeKai " + e.lang + " sid=" + e.sid + ": " + (decoded ? JSON.stringify(decoded) : "null"));
-      if (!decoded) continue;
-
-      embedUrl = typeof decoded === "string" ? decoded : (decoded.url || "");
-      if (!embedUrl) continue;
-    }
+    if (!embedUrl) continue;
 
     console.log("[animekai] embedUrl " + e.lang + ": " + embedUrl.substring(0, 100));
+    if (/^https:\/\/megaup\.live\//i.test(embedUrl)) {
+      console.log("[animekai] skipping megaup.live mirror: iOS AVPlayer rejects its rrr.megaup.cc TLS chain");
+      continue;
+    }
+    if (seenEmbed[embedUrl]) continue;
+    seenEmbed[embedUrl] = true;
+
+    var option = {
+      embed:   embedUrl,
+      server:  "megaup",
+      quality: e.lang + (e.name ? " — " + e.name : ""),
+      browserSession: true,
+      headers: megaupHeadersForEmbed(embedUrl)
+    };
+    if (subtitles.length > 0) option.subtitles = subtitles;
 
     // Delegate all embed URLs to the appropriate extractor
     if (embedUrl.indexOf("megaup.") !== -1 || embedUrl.indexOf("anikai.to/iframe/") !== -1) {
-      results.push({
-        embed:   embedUrl,
-        server:  "megaup",
-        quality: e.lang + (e.name ? " — " + e.name : "")
-      });
+      results.push(option);
       continue;
     }
 
     // Unknown embed host — try as generic embed
-    results.push({
-      embed:   embedUrl,
-      server:  "megaup",
-      quality: e.lang + (e.name ? " — " + e.name : "")
-    });
+    results.push(option);
   }
+
+  // Megaup directo resuelve mejor en WKWebView que los iframes de anikai (menos CF / menos cadenas).
+  function embedProbeRank(embed) {
+    if (!embed) return 2;
+    var u = "" + embed;
+    if (u.indexOf("megaup.") !== -1) return 0;
+    if (u.indexOf("anikai.to/iframe/") !== -1) return 2;
+    return 1;
+  }
+  results.sort(function (a, b) {
+    var ra = embedProbeRank(a.embed);
+    var rb = embedProbeRank(b.embed);
+    if (ra !== rb) return ra - rb;
+    return 0;
+  });
 
   console.log("[animekai] resultados=" + results.length);
   return results;
