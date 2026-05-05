@@ -7,7 +7,7 @@ const SOURCE = {
   name: "AniZone",
   baseUrl: "https://anizone.to",
   language: "en",
-  version: "1.0.0",
+  version: "1.0.1",
   iconUrl: "https://anizone.to/favicon.ico",
   contentKind: "anime",
   extractorRepositoryUrl: "https://raw.githubusercontent.com/kakuga-code/extensions/refs/heads/main/repo-extractores.json",
@@ -332,6 +332,8 @@ function parseSubtitleTracks(html) {
 
     var src = absoluteUrl(decodeHtml(srcM[2] || srcM[1] || ""));
     if (!src || seen[src]) continue;
+    // Evitar tracks basura (ads/snippets) que rompen la UI/selector.
+    if (!/\.(vtt|srt|ass|ssa|ttml)(\?|$)/i.test(src)) continue;
     seen[src] = true;
 
     var labelM = tag.match(/\blabel=(['"])(.*?)\1/i);
@@ -346,8 +348,86 @@ function parseSubtitleTracks(html) {
       label: (labelM ? decodeHtml(String(labelM[2] || labelM[1] || "")).replace(/[-_]/g, " ").trim() : "Subtitle"),
       isDefault: isDefault
     });
+    if (subtitles.length >= 20) break;
   }
   return subtitles;
+}
+
+function resolveStableHlsPlaylist(masterUrl, headers) {
+  if (!masterUrl || masterUrl.indexOf(".m3u8") === -1) return masterUrl;
+  var masterText = http.get(masterUrl, headers || {});
+  if (!masterText || masterText.indexOf("#EXTM3U") === -1) return masterUrl;
+
+  function joinUrl(base, rel) {
+    if (!rel) return null;
+    if (/^https?:\/\//i.test(rel)) return rel;
+    if (rel.indexOf("//") === 0) return "https:" + rel;
+    var originM = String(base).match(/^(https?:\/\/[^\/?#]+)/i);
+    var origin = originM ? originM[1] : "";
+    if (!origin) return rel;
+    if (rel.charAt(0) === "/") return origin + rel;
+    var dir = String(base).replace(/[?#].*$/, "").replace(/\/[^\/]*$/, "/");
+    return dir + rel.replace(/^\/+/, "");
+  }
+
+  function firstNonCommentLines(text, count) {
+    var out = [];
+    var lines = String(text || "").split("\n");
+    for (var i = 0; i < lines.length; i++) {
+      var l = lines[i].trim();
+      if (!l || l.charAt(0) === "#") continue;
+      out.push(l);
+      if (out.length >= count) break;
+    }
+    return out;
+  }
+
+  var lines = masterText.split("\n");
+  var variants = [];
+  for (var i = 0; i < lines.length; i++) {
+    var line = (lines[i] || "").trim();
+    if (line.indexOf("#EXT-X-STREAM-INF") === 0 && i + 1 < lines.length) {
+      var next = (lines[i + 1] || "").trim();
+      if (!next || next.indexOf("#") === 0) continue;
+      variants.push(joinUrl(masterUrl, next));
+    }
+  }
+  if (variants.length === 0) return masterUrl;
+
+  // Probar variantes y validar que sus segmentos sean accesibles en distintos puntos
+  // para evitar stalls al adelantar.
+  var best = null;
+  var bestScore = -1;
+  for (var v = 0; v < variants.length; v++) {
+    var candidate = variants[v];
+    if (!candidate) continue;
+    var playlist = http.get(candidate, headers || {});
+    if (!playlist || playlist.indexOf("#EXTM3U") === -1) continue;
+
+    var mediaLines = firstNonCommentLines(playlist, 1000);
+    if (mediaLines.length === 0) continue;
+
+    var points = [0, Math.floor(mediaLines.length / 2), mediaLines.length - 1];
+    var tested = {};
+    var score = 0;
+    for (var p = 0; p < points.length; p++) {
+      var idx = points[p];
+      if (idx < 0 || idx >= mediaLines.length) continue;
+      if (tested[idx]) continue;
+      tested[idx] = true;
+      var segUrl = joinUrl(candidate, mediaLines[idx]);
+      if (!segUrl) continue;
+      var segData = http.get(segUrl, headers || {});
+      if (segData && segData.length > 0) score++;
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = candidate;
+    }
+  }
+
+  return best || masterUrl;
 }
 
 function fetchVideoList(episodeId) {
@@ -359,6 +439,11 @@ function fetchVideoList(episodeId) {
   var out = [];
   var seen = {};
   var subtitles = parseSubtitleTracks(html);
+  var playbackHeaders = {
+    "Referer": url,
+    "Origin": SOURCE.baseUrl,
+    "User-Agent": PAGE_HEADERS["User-Agent"]
+  };
 
   // Prefer <media-player src="..."> — exact and unambiguous
   var mediaPlayerM = html.match(/<media-player[^>]+\ssrc=['"]([^'"]+\.m3u8[^'"]*)['"]/i);
@@ -366,14 +451,38 @@ function fetchVideoList(episodeId) {
   if (mediaPlayerM) {
     var mpUrl = absoluteUrl(decodeHtml(mediaPlayerM[1]));
     if (mpUrl && !seen[mpUrl]) {
-      seen[mpUrl] = true;
       var isHls = mpUrl.indexOf(".m3u8") !== -1;
-      out.push({
-        url: mpUrl,
-        server: isHls ? "anizone-hls" : "anizone-mp4",
-        quality: isHls ? "HLS" : "MP4",
-        headers: { "Referer": url }
-      });
+      if (isHls) {
+        mpUrl = resolveStableHlsPlaylist(mpUrl, playbackHeaders);
+      }
+      if (seen[mpUrl]) {
+        isHls = mpUrl.indexOf(".m3u8") !== -1;
+      } else {
+        seen[mpUrl] = true;
+      }
+      // Fallback: algunos CDNs fallan en AVPlayer cuando se fuerzan headers.
+      // Priorizamos la variante directa sin headers y dejamos HLS con headers como respaldo.
+      if (isHls) {
+        out.push({
+          url: mpUrl,
+          server: "anizone-hls-direct",
+          quality: "HLS (Direct)",
+          headers: {}
+        });
+        out.push({
+          url: mpUrl,
+          server: "anizone-hls",
+          quality: "HLS (Fallback)",
+          headers: playbackHeaders
+        });
+      } else {
+        out.push({
+          url: mpUrl,
+          server: "anizone-mp4",
+          quality: "MP4",
+          headers: playbackHeaders
+        });
+      }
     }
   }
 
@@ -386,7 +495,7 @@ function fetchVideoList(episodeId) {
       seen,
       "anizone-hls",
       "HLS",
-      { "Referer": url }
+      playbackHeaders
     );
     collectUrls(
       html,
@@ -395,7 +504,7 @@ function fetchVideoList(episodeId) {
       seen,
       "anizone-mp4",
       "MP4",
-      { "Referer": url }
+      playbackHeaders
     );
   }
 
@@ -417,7 +526,7 @@ function fetchVideoList(episodeId) {
         embed: embed,
         server: "anizone-embed",
         quality: "Embed",
-        headers: { "Referer": url },
+        headers: playbackHeaders,
         subtitles: subtitles
       });
     }
