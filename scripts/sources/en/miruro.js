@@ -22,13 +22,30 @@ const MIRURO_PIPE_OBF_KEY_HEX = "71951034f8fbcf53d89db52ceb3dc22c";
 const MIRURO_DISABLED_PROVIDERS = {
   ally: true,
   bee: true,
+  /** Bun starts inside Miruro's web player but fails when Kazemi probes/promotes it. */
+  bun: true,
   /** Often return Cloudflare HTML instead of pipe JSON when hammered. */
   arc: true,
-  hop: true
+  hop: true,
+  /** Pipe `sources` often returns CF HTML from Kazemi HTTP; use SSR/WebView instead. */
+  animekai: true,
+  zoro: true
+};
+
+/** Providers we resolve via `/api/secure/pipe` (must match what Miruro exposes reliably). */
+const MIRURO_PIPE_PROVIDERS = {
+  kiwi: true,
+  telli: true,
+  bun: true,
+  nun: true,
+  dune: true
 };
 
 /** Same order as Miruro UI /  */
 const MIRURO_PROVIDER_PRIORITY = ["kiwi", "telli", "bun", "nun", "dune", "hop"];
+
+var MIRURO_STREAM_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 const ANILIST_GRAPHQL = "https://graphql.anilist.co";
 
@@ -37,7 +54,7 @@ const SOURCE = {
   name: "Miruro",
   baseUrl: MIRURO_OFFICIAL_BASES[0],
   language: "en",
-  version: "1.0.0",
+  version: "1.0.1",
   iconUrl: "https://www.miruro.tv/icon-light-1024x1024.png",
   contentKind: "anime",
   extractorRepositoryUrl: "https://raw.githubusercontent.com/kakuga-code/extensions/refs/heads/main/repo-extractores.json",
@@ -385,33 +402,27 @@ function miruroTextFromBytes(bytes) {
   return parts.join("");
 }
 
-function miruroSecurePipeJson(path, query, refererUrl) {
-  var payload = {
-    path: path,
-    method: "GET",
-    query: query || {},
-    body: null,
-    version: "0.2.0"
-  };
-  var origin = miruroApiOrigin();
-  var url = origin + "/api/secure/pipe?e=" + miruroBase64UrlEncodeJson(payload);
-  var raw = httpGetRaw(url, {
+function miruroPipeRequestHeaders(origin, refererUrl) {
+  var ref = refererUrl || origin + "/";
+  return {
     "User-Agent":
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     Accept: "*/*",
     "Accept-Language": "en-US,en;q=0.9",
     "Accept-Encoding": "identity",
     Origin: origin,
-    Referer: refererUrl || origin + "/"
-  });
-  if (!raw) {
-    console.log("[miruro] secure pipe empty path=" + path + " api=" + origin);
-    return null;
-  }
+    Referer: ref,
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Dest": "empty"
+  };
+}
+
+function miruroParsePipeRaw(path, raw, origin) {
+  if (!raw) return null;
   try {
     if (raw.charAt(0) === "{" || raw.charAt(0) === "[") return JSON.parse(raw);
     if (raw.charAt(0) === "<") {
-      console.log("[miruro] secure pipe html path=" + path + " head=" + raw.substring(0, 80));
       return null;
     }
     if (raw.length < 200 && raw.indexOf("error") !== -1) {
@@ -437,6 +448,46 @@ function miruroSecurePipeJson(path, query, refererUrl) {
     );
     return null;
   }
+}
+
+function miruroSecurePipeJson(path, query, refererUrl) {
+  var payload = {
+    path: path,
+    method: "GET",
+    query: query || {},
+    body: null,
+    version: "0.2.0"
+  };
+  var encoded = miruroBase64UrlEncodeJson(payload);
+  var bases = [miruroApiOrigin()];
+  for (var bi = 0; bi < MIRURO_OFFICIAL_BASES.length; bi++) {
+    var candidate = String(MIRURO_OFFICIAL_BASES[bi]).replace(/\/+$/, "");
+    if (bases.indexOf(candidate) === -1) bases.push(candidate);
+  }
+
+  for (var oi = 0; oi < bases.length; oi++) {
+    var origin = bases[oi];
+    var url = origin + "/api/secure/pipe?e=" + encoded;
+    var raw = httpGetRaw(url, miruroPipeRequestHeaders(origin, refererUrl));
+    if (!raw) {
+      console.log("[miruro] secure pipe empty path=" + path + " api=" + origin);
+      continue;
+    }
+    var parsed = miruroParsePipeRaw(path, raw, origin);
+    if (parsed) {
+      if (oi > 0) {
+        SOURCE.baseUrl = origin;
+        console.log("[miruro] secure pipe ok path=" + path + " via mirror " + origin);
+      }
+      return parsed;
+    }
+    if (raw.charAt(0) === "<") {
+      console.log(
+        "[miruro] secure pipe html path=" + path + " api=" + origin + " head=" + raw.substring(0, 80)
+      );
+    }
+  }
+  return null;
 }
 
 /**
@@ -500,6 +551,16 @@ function miruroExtractorServerId(pid, langKey) {
   return pid + ":" + langKey;
 }
 
+function miruroBrowserSessionUrl(embedUrl, pid, langKey) {
+  var base = String(embedUrl || "");
+  var marker =
+    "#kz-provider=" +
+    encodeURIComponent(String(pid || "")) +
+    "&kz-lang=" +
+    encodeURIComponent(String(langKey || "sub"));
+  return base.replace(/#.*$/, "") + marker;
+}
+
 /**
  * Builds one PlaybackOption per provider track from SSR config embedded in the watch HTML.
  * All rows share the same /watch URL; Miruro stores the chosen provider in localStorage, not the URL.
@@ -520,16 +581,16 @@ function buildMiruroProviderPlaybackOptionsFromSSR(config, embedUrl) {
       out.push({
         server: miruroExtractorServerId(pid, "sub"),
         quality: "Miruro — " + miruroProviderLabel(pid, meta, "sub"),
-        embed: embedUrl,
-        browserSession: true
+        embed: miruroBrowserSessionUrl(embedUrl, pid, "sub"),
+        browserSession: false
       });
     }
     if (caps.ssub) {
       out.push({
         server: miruroExtractorServerId(pid, "ssub"),
         quality: "Miruro — " + miruroProviderLabel(pid, meta, "ssub"),
-        embed: embedUrl,
-        browserSession: true
+        embed: miruroBrowserSessionUrl(embedUrl, pid, "ssub"),
+        browserSession: false
       });
     }
   }
@@ -555,7 +616,13 @@ function initMiruroBaseFromMirrors() {
   console.log("[miruro] No /health response; keeping default baseUrl=" + SOURCE.baseUrl);
 }
 
-initMiruroBaseFromMirrors();
+var _miruroBaseInitialized = false;
+
+function ensureMiruroBaseReady() {
+  if (_miruroBaseInitialized) return;
+  _miruroBaseInitialized = true;
+  initMiruroBaseFromMirrors();
+}
 
 const DEFAULT_HEADERS = {
   "User-Agent":
@@ -894,21 +961,159 @@ function filterMiruroWebDuplicates(options) {
   return other.length ? other : rows;
 }
 
-function miruroSubtitleTracks(items) {
-  var raw = items || [];
+function miruroSubtitleRequestHeaders(watchReferer) {
+  var ref = String(watchReferer || miruroApiOrigin() + "/").replace(/#.*$/, "");
+  var origin = ref.replace(/\/+$/, "");
+  try {
+    var u = new URL(ref);
+    origin = u.origin;
+  } catch (e) {}
+  return {
+    Referer: ref,
+    Origin: origin,
+    "User-Agent": MIRURO_STREAM_UA
+  };
+}
+
+function miruroSubtitleHeadersForUrl(url, fallbackHeaders) {
+  var host = "";
+  try {
+    host = new URL(String(url || "")).host.toLowerCase();
+  } catch (e) {}
+  if (
+    host.indexOf("lostproject.club") !== -1 ||
+    host.indexOf("watching.onl") !== -1
+  ) {
+    return {
+      Referer: "https://megaplay.buzz/",
+      Origin: "https://megaplay.buzz",
+      "User-Agent": MIRURO_STREAM_UA
+    };
+  }
+  return fallbackHeaders || null;
+}
+
+function miruroNormalizeSubtitleUrl(url) {
+  var raw = String(url || "");
+  try {
+    var parsed = new URL(raw);
+    var host = parsed.host.toLowerCase();
+    if (host.indexOf("watching.onl") !== -1) {
+      parsed.protocol = "https:";
+      parsed.host = "1oe.lostproject.club";
+      return parsed.toString();
+    }
+  } catch (e) {}
+  return raw;
+}
+
+function miruroSubtitleTracks(items, fetchHeaders) {
+  var raw = items;
+  if (!raw) return [];
+  if (!Array.isArray(raw)) {
+    if (Array.isArray(raw.tracks)) raw = raw.tracks;
+    else if (Array.isArray(raw.subtitles)) raw = raw.subtitles;
+    else if (Array.isArray(raw.captions)) raw = raw.captions;
+    else if (Array.isArray(raw.textTracks)) raw = raw.textTracks;
+    else raw = [];
+  }
   var out = [];
   var seen = Object.create(null);
   for (var i = 0; i < raw.length; i++) {
     var item = raw[i] || {};
+    var kind = String(item.kind || item.type || "").toLowerCase();
+    if (kind && kind !== "captions" && kind !== "subtitles" && kind !== "subtitle" && kind !== "vtt") {
+      continue;
+    }
     var url = item.url || item.file;
+    url = miruroNormalizeSubtitleUrl(url);
     if (!url || seen[url]) continue;
     seen[url] = true;
-    out.push({
+    var row = {
       url: String(url),
-      language: item.language || item.lang || "und",
-      label: item.label || item.language || "Subtitles",
+      language: item.language || item.lang || item.srclang || "und",
+      label: item.label || item.name || item.language || item.lang || "Subtitles",
       isDefault: !!(item.isDefault || item.default)
-    });
+    };
+    var headers = miruroSubtitleHeadersForUrl(url, item.headers || fetchHeaders);
+    if (headers) row.headers = headers;
+    out.push(row);
+  }
+  return out;
+}
+
+function miruroMergeSubtitleTracks(primary, fallback) {
+  var out = [];
+  var seen = Object.create(null);
+  var groups = [primary || [], fallback || []];
+  for (var g = 0; g < groups.length; g++) {
+    var list = groups[g];
+    for (var i = 0; i < list.length; i++) {
+      var item = list[i] || {};
+      var url = item.url || item.file;
+      url = miruroNormalizeSubtitleUrl(url);
+      if (!url || seen[url]) continue;
+      seen[url] = true;
+      item.url = url;
+      out.push(item);
+    }
+  }
+  return out;
+}
+
+function miruroSubtitleTracksFromHtml(html, pageUrl) {
+  var text = String(html || "");
+  if (!text) return [];
+  var out = [];
+  var seen = Object.create(null);
+  var fetchHeaders = miruroSubtitleRequestHeaders(pageUrl);
+  var trackRe = /<track\b[^>]*>/gi;
+  var tm;
+  while ((tm = trackRe.exec(text)) !== null) {
+    var tag = tm[0];
+    if (!/\bkind=['"]?(subtitles|captions)['"]?/i.test(tag)) continue;
+    var srcM = tag.match(/\bsrc=(['"])(.*?)\1/i);
+    if (!srcM) srcM = tag.match(/\bsrc=([^\s>]+)/i);
+    if (!srcM) continue;
+    var src = srcM[2] || srcM[1] || "";
+    if (!src) continue;
+    var url = absoluteUrl(src);
+    if ((!url || url === src) && pageUrl && src.charAt(0) === "/") {
+      var originM = String(pageUrl).match(/^(https?:\/\/[^\/?#]+)/i);
+      if (originM) url = originM[1] + src;
+    }
+    url = miruroNormalizeSubtitleUrl(url);
+    if (!url || seen[url]) continue;
+    seen[url] = true;
+    var labelM = tag.match(/\blabel=(['"])(.*?)\1/i);
+    if (!labelM) labelM = tag.match(/\blabel=([^\s>]+)/i);
+    var langM = tag.match(/\bsrclang=(['"])(.*?)\1/i);
+    if (!langM) langM = tag.match(/\bsrclang=([^\s>]+)/i);
+    var row = {
+      url: String(url),
+      language: (langM ? String(langM[2] || langM[1] || "").toLowerCase() : "und"),
+      label: (labelM ? String(labelM[2] || labelM[1] || "") : "Subtitles"),
+      isDefault: /\bdefault\b/i.test(tag)
+    };
+    var headers = miruroSubtitleHeadersForUrl(url, fetchHeaders);
+    if (headers) row.headers = headers;
+    out.push(row);
+  }
+  var vttRe = /https?:\/\/[^"'\\s]+?\.(?:vtt|srt|ass|ssa|ttml)(?:\?[^"'\\s]*)?/gi;
+  var vm;
+  while ((vm = vttRe.exec(text)) !== null) {
+    var vtt = miruroNormalizeSubtitleUrl(String(vm[0] || ""));
+    if (!vtt || seen[vtt]) continue;
+    seen[vtt] = true;
+    var vttRow = {
+      url: vtt,
+      language: "und",
+      label: "Subtitles",
+      isDefault: false
+    };
+    var vttHeaders = miruroSubtitleHeadersForUrl(vtt, fetchHeaders);
+    if (vttHeaders) vttRow.headers = vttHeaders;
+    out.push(vttRow);
   }
   return out;
 }
@@ -917,9 +1122,17 @@ function miruroEpisodeSourceConfigs(episodesPayload, epNum) {
   var providers = episodesPayload && episodesPayload.providers;
   if (!providers) return [];
   var configs = [];
+  var skipped = [];
   for (var provider in providers) {
     if (!providers.hasOwnProperty(provider)) continue;
-    if (MIRURO_DISABLED_PROVIDERS[provider]) continue;
+    if (MIRURO_DISABLED_PROVIDERS[provider]) {
+      skipped.push(provider + "(disabled)");
+      continue;
+    }
+    if (!MIRURO_PIPE_PROVIDERS[provider]) {
+      skipped.push(provider + "(no-pipe)");
+      continue;
+    }
     var buckets = providers[provider] && providers[provider].episodes;
     if (!buckets) continue;
     for (var category in buckets) {
@@ -946,6 +1159,9 @@ function miruroEpisodeSourceConfigs(episodesPayload, epNum) {
     if (bi < 0) bi = 99;
     return ai - bi;
   });
+  if (skipped.length) {
+    console.log("[miruro] ep=" + epNum + " pipe providers skipped: " + skipped.join(", "));
+  }
   return configs;
 }
 
@@ -957,10 +1173,27 @@ function miruroOptionsHaveHls(options) {
   return false;
 }
 
+function miruroCategoryCarriesSubtitles(category) {
+  var c = String(category || "").toLowerCase();
+  return c === "sub" || c === "ssub" || c === "hsub";
+}
+
+/** Miruro often returns subtitles under `ssub` while the episode map says `sub`. */
+function miruroCollectSubtitlesFromSourcesPayload(payload, fetchHeaders) {
+  var out = miruroSubtitleTracks(payload, fetchHeaders);
+  if (!payload || typeof payload !== "object") return out;
+  var keys = ["sub", "ssub", "hsub", "dub", "hdub"];
+  for (var i = 0; i < keys.length; i++) {
+    var bucket = payload[keys[i]];
+    if (bucket) out = miruroMergeSubtitleTracks(miruroSubtitleTracks(bucket, fetchHeaders), out);
+  }
+  return out;
+}
+
 function collectMiruroVideoStreams(payload, category) {
   if (!payload) return { streams: [], subtitles: [] };
+  var subArray = miruroCollectSubtitlesFromSourcesPayload(payload);
   var videoArray = payload.sources || payload.streams || [];
-  var subArray = miruroSubtitleTracks(payload.subtitles || []);
   if (!videoArray.length) {
     var keys = [category, "sub", "ssub", "dub", "hdub", "hsub"];
     for (var k = 0; k < keys.length; k++) {
@@ -968,12 +1201,10 @@ function collectMiruroVideoStreams(payload, category) {
       if (!bucket) continue;
       if (bucket.streams && bucket.streams.length) {
         videoArray = bucket.streams;
-        subArray = miruroSubtitleTracks(bucket.subtitles || subArray);
         break;
       }
       if (bucket.sources && bucket.sources.length) {
         videoArray = bucket.sources;
-        subArray = miruroSubtitleTracks(bucket.subtitles || subArray);
         break;
       }
     }
@@ -981,8 +1212,80 @@ function collectMiruroVideoStreams(payload, category) {
   return { streams: videoArray, subtitles: subArray };
 }
 
-var MIRURO_STREAM_UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+/**
+ * Fetches VTT/SRT tracks from pipe `sources` for every provider that lists this episode
+ * (including bee/animekai even when video mirrors use kiwi via WebView).
+ */
+function miruroFetchEpisodeSubtitles(anilistId, epNum, episodesPayload, watchReferer) {
+  if (!episodesPayload) {
+    episodesPayload = miruroSecurePipeJson("episodes", { anilistId: String(anilistId) }, watchReferer);
+  }
+  if (!episodesPayload || !episodesPayload.providers) return [];
+
+  var subHeaders = miruroSubtitleRequestHeaders(watchReferer);
+  var merged = [];
+  var providers = episodesPayload.providers;
+  var subtitleSkip = { hop: true, ally: true, arc: true };
+
+  for (var pname in providers) {
+    if (!providers.hasOwnProperty(pname)) continue;
+    var pl = String(pname).toLowerCase();
+    if (subtitleSkip[pl]) continue;
+
+    var buckets = providers[pname] && providers[pname].episodes;
+    if (!buckets) continue;
+
+    for (var category in buckets) {
+      if (!buckets.hasOwnProperty(category)) continue;
+      if (!miruroCategoryCarriesSubtitles(category)) continue;
+
+      var list = buckets[category];
+      if (!Array.isArray(list)) continue;
+
+      var epEntry = null;
+      for (var ei = 0; ei < list.length; ei++) {
+        if (parseInt(list[ei] && list[ei].number, 10) === parseInt(epNum, 10)) {
+          epEntry = list[ei];
+          break;
+        }
+      }
+      if (!epEntry || !epEntry.id) continue;
+
+      var srcQuery = {
+        episodeId: String(epEntry.id),
+        provider: pl,
+        category: String(category).toLowerCase(),
+        ttl: 86400
+      };
+      if (pl === "dune" || pl === "zoro" || pl === "arc") {
+        srcQuery.anilistId = parseInt(anilistId, 10);
+      }
+
+      var payload = miruroSecurePipeJson("sources", srcQuery, watchReferer);
+      if (!payload) continue;
+
+      var tracks = miruroCollectSubtitlesFromSourcesPayload(payload, subHeaders);
+      if (tracks.length) {
+        merged = miruroMergeSubtitleTracks(tracks, merged);
+        console.log(
+          "[miruro] subtitles from pipe " + pl + "/" + category + " count=" + tracks.length
+        );
+      }
+    }
+  }
+
+  return merged;
+}
+
+function miruroAttachSubtitlesToOptions(options, subtitles) {
+  if (!subtitles || !subtitles.length || !options || !options.length) return options;
+  for (var i = 0; i < options.length; i++) {
+    var row = options[i] || {};
+    var existing = row.subtitles || [];
+    row.subtitles = miruroMergeSubtitleTracks(subtitles, existing);
+  }
+  return options;
+}
 
 function miruroEmbedPageForStream(stream, provider) {
   var ref = stream && stream.referer;
@@ -1055,7 +1358,7 @@ function normalizeMiruroPlaybackOptions(provider, category, payload) {
       "Auto";
     var langTag = category.indexOf("dub") !== -1 ? "DUB" : "SUB";
     var title = "Miruro — " + provider + " (" + quality + ") [" + langTag + "]";
-    var subtitles = category.indexOf("sub") !== -1 ? collected.subtitles : [];
+    var subtitles = miruroCategoryCarriesSubtitles(category) ? collected.subtitles : [];
 
     if (s.type === "hls" || streamUrl.indexOf(".m3u8") !== -1 || streamUrl.indexOf(".mp4") !== -1) {
       if (hlsCount >= 4) continue;
@@ -1089,8 +1392,29 @@ function fetchMiruroDynamicPlaybackOptions(anilistId, epNum, episodesPayload, wa
     return [];
   }
   var configs = miruroEpisodeSourceConfigs(episodesPayload, epNum);
-  console.log("[miruro] source configs ep=" + epNum + " count=" + configs.length);
-  if (!configs.length) return [];
+  console.log(
+    "[miruro] source configs ep=" +
+      epNum +
+      " count=" +
+      configs.length +
+      (configs.length
+        ? " (" +
+          configs
+            .map(function (c) {
+              return c.provider + "/" + c.category;
+            })
+            .join(", ") +
+          ")"
+        : "")
+  );
+  if (!configs.length) {
+    console.log(
+      "[miruro] no pipe providers for ep=" +
+        epNum +
+        " — use SSR mirrors (kiwi/bun/dune/nun) in the player"
+    );
+    return [];
+  }
 
   var out = [];
   for (var i = 0; i < configs.length; i++) {
@@ -1127,6 +1451,8 @@ function fetchMiruroDynamicPlaybackOptions(anilistId, epNum, episodesPayload, wa
  * load (Kazemi cannot drive Miruro’s encrypted pipe / localStorage provider key from JS alone).
  */
 function fetchVideoList(episodeIdStr) {
+  ensureMiruroBaseReady();
+  ensureMiruroPako();
   var parts = String(episodeIdStr || "").split("|");
   var alId = (parts[0] || "").trim();
   if (!alId) return [];
@@ -1141,33 +1467,55 @@ function fetchVideoList(episodeIdStr) {
   var embedUrl = miruroWatchUrlForEpisode(pub, alId, slug, epNum);
 
   var episodesPayload = miruroSecurePipeJson("episodes", { anilistId: String(alId) }, embedUrl);
+  var pipeSubtitleTracks = miruroFetchEpisodeSubtitles(alId, epNum, episodesPayload, embedUrl);
   var directOptions = fetchMiruroDynamicPlaybackOptions(alId, epNum, episodesPayload, embedUrl);
 
   if (directOptions.length) {
-    var playable = filterMiruroWebDuplicates(directOptions);
+    var playable = miruroAttachSubtitlesToOptions(
+      filterMiruroWebDuplicates(directOptions),
+      pipeSubtitleTracks
+    );
     console.log(
       "[miruro] fetchVideoList ep=" +
         epNum +
         " direct=" +
         playable.length +
         " api=" +
-        miruroApiOrigin()
+        miruroApiOrigin() +
+        " subtitles=" +
+        pipeSubtitleTracks.length
     );
     return playable;
   }
 
   var html = httpGetHtml(embedUrl);
+  var htmlSubtitleTracks = miruroMergeSubtitleTracks(
+    pipeSubtitleTracks,
+    miruroSubtitleTracksFromHtml(html, embedUrl)
+  );
   var ssrCfg = html ? extractJsonObjectAfterMarker(html, "window.__SSR_CONFIG__=") : null;
   var fromSSR = buildMiruroProviderPlaybackOptionsFromSSR(ssrCfg, embedUrl);
   if (fromSSR && fromSSR.length) {
+    if (htmlSubtitleTracks.length) {
+      miruroAttachSubtitlesToOptions(fromSSR, htmlSubtitleTracks);
+    }
     console.log(
-      "[miruro] fetchVideoList ep=" + epNum + " providers=" + fromSSR.length + " (SSR labels only)"
+      "[miruro] fetchVideoList ep=" +
+        epNum +
+        " providers=" +
+        fromSSR.length +
+        " subtitles=" +
+        htmlSubtitleTracks.length +
+        " (SSR labels only)"
     );
     return fromSSR;
   }
 
   var fallbackProviders = buildMiruroProviderPlaybackOptionsFromSSR(MIRURO_DEFAULT_PLAYER_CONFIG, embedUrl);
   if (fallbackProviders && fallbackProviders.length) {
+    if (htmlSubtitleTracks.length) {
+      miruroAttachSubtitlesToOptions(fallbackProviders, htmlSubtitleTracks);
+    }
     console.log(
       "[miruro] fetchVideoList ep=" +
         epNum +
@@ -1175,6 +1523,8 @@ function fetchVideoList(episodeIdStr) {
         embedUrl +
         " providers=" +
         fallbackProviders.length +
+        " subtitles=" +
+        htmlSubtitleTracks.length +
         " (default config fallback; htmlLen=" +
         (html ? html.length : 0) +
         ")"
